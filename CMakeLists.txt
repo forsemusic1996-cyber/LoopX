@@ -30,6 +30,8 @@ juce_add_plugin(MiniSampler
     NEEDS_MIDI_INPUT TRUE
     COPY_PLUGIN_AFTER_BUILD TRUE)
 
+juce_generate_juce_header(MiniSampler)
+
 target_sources(MiniSampler
     PRIVATE
         Source/PluginProcessor.cpp
