@@ -50,7 +50,3 @@ target_link_libraries(MiniSampler
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
-
-if (WIN32)
-    target_link_libraries(MiniSampler PRIVATE dbghelp)
-endif()
