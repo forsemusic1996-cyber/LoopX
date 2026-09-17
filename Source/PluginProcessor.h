@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <JuceHeader.h>
 
 class MiniSamplerAudioProcessor final : public juce::AudioProcessor
