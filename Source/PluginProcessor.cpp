@@ -5,12 +5,17 @@ MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
     : AudioProcessor(BusesProperties()
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
+    writeDiagnostic("processor: constructor begin");
     formatManager.registerBasicFormats();
+    writeDiagnostic("processor: formats registered");
 
     for (auto i = 0; i < 16; ++i)
         synth.addVoice(new juce::SamplerVoice());
+    writeDiagnostic("processor: voices added");
 
+    // Start with a tiny generated sample so the plugin is immediately testable.
     juce::AudioBuffer<float> generatedSample(1, 22050);
+    writeDiagnostic("processor: generated buffer allocated");
     auto* samples = generatedSample.getWritePointer(0);
     for (int i = 0; i < generatedSample.getNumSamples(); ++i)
     {
@@ -23,6 +28,7 @@ MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
     juce::WavAudioFormat wavFormat;
     std::unique_ptr<juce::AudioFormatWriter> writer(
         wavFormat.createWriterFor(&wavData, 44100.0, 1, 16, {}, 0));
+    writeDiagnostic(writer != nullptr ? "processor: wav writer created" : "processor: wav writer FAILED");
 
     if (writer != nullptr)
     {
@@ -31,17 +37,30 @@ MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
 
         juce::MemoryInputStream input(wavData.getData(), wavData.getDataSize(), false);
         std::unique_ptr<juce::AudioFormatReader> reader(wavFormat.createReaderFor(&input, false));
+        writeDiagnostic(reader != nullptr ? "processor: wav reader created" : "processor: wav reader FAILED");
         if (reader != nullptr)
         {
             juce::BigInteger notes;
             notes.setRange(0, 128, true);
             synth.addSound(new juce::SamplerSound("Generated test sample", *reader, notes, 60, 0.01, 0.2, 2.0));
+            writeDiagnostic("processor: generated sound added");
         }
     }
+
+    writeDiagnostic("processor: constructor complete");
+}
+
+void MiniSamplerAudioProcessor::writeDiagnostic(const juce::String& message) const
+{
+    const auto logFile = juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
+                             .getChildFile("MiniSampler-diagnostics.log");
+    logFile.appendText(juce::Time::getCurrentTime().toISO8601(true) + " " + message + "\n",
+                       false, false, "UTF-8");
 }
 
 void MiniSamplerAudioProcessor::prepareToPlay(double sampleRate, int)
 {
+    writeDiagnostic("processor: prepareToPlay " + juce::String(sampleRate));
     const juce::ScopedLock lock(synthLock);
     synth.setCurrentPlaybackSampleRate(sampleRate);
 }
@@ -62,6 +81,10 @@ bool MiniSamplerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout
 void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                              juce::MidiBuffer& midiMessages)
 {
+    static std::atomic<bool> firstProcessBlock { false };
+    if (!firstProcessBlock.exchange(true))
+        writeDiagnostic("processor: first processBlock channels=" + juce::String(buffer.getNumChannels())
+                        + " samples=" + juce::String(buffer.getNumSamples()));
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
 
@@ -100,7 +123,10 @@ juce::String MiniSamplerAudioProcessor::getLoadedSampleName() const
 
 juce::AudioProcessorEditor* MiniSamplerAudioProcessor::createEditor()
 {
-    return new MiniSamplerAudioProcessorEditor(*this);
+    writeDiagnostic("processor: createEditor begin");
+    auto* editor = new MiniSamplerAudioProcessorEditor(*this);
+    writeDiagnostic("processor: createEditor complete");
+    return editor;
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
