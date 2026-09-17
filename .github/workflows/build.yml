@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2022
+    runs-on: windows-latest
 
     steps:
       - name: Checkout project
@@ -21,13 +21,20 @@ jobs:
         shell: pwsh
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DJUCE_DIR="$env:GITHUB_WORKSPACE\JUCE"
 
-      - name: Build VST3
+      - name: Build VST3 with symbols
         shell: pwsh
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config RelWithDebInfo --parallel
 
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
           name: MiniSampler-VST3
-          path: build/**/Release/VST3/*.vst3
+          path: build/**/RelWithDebInfo/VST3/*.vst3
           if-no-files-found: error
+
+      - name: Upload debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiniSampler-symbols
+          path: build/**/*.pdb
+          if-no-files-found: warn
