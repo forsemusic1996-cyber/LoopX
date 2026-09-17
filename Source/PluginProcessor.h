@@ -34,6 +34,7 @@ public:
     bool loadSample(const juce::File& file);
     juce::String getLoadedSampleName() const;
     juce::MidiKeyboardState& getKeyboardState() { return keyboardState; }
+    void writeDiagnostic(const juce::String& message) const;
 
 private:
     juce::AudioFormatManager formatManager;
