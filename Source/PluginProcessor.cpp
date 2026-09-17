@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+
 #if JUCE_WINDOWS
  #include <Windows.h>
  #include <DbgHelp.h>
@@ -11,6 +12,7 @@ namespace
 #if JUCE_WINDOWS
 std::atomic_flag crashDumpWritten = ATOMIC_FLAG_INIT;
 std::wstring crashDumpDirectory;
+
 LONG WINAPI miniSamplerVectoredExceptionHandler(EXCEPTION_POINTERS* exceptionInfo) noexcept
 {
     if (exceptionInfo == nullptr || crashDumpWritten.test_and_set())
@@ -39,6 +41,7 @@ LONG WINAPI miniSamplerVectoredExceptionHandler(EXCEPTION_POINTERS* exceptionInf
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
+
 void installMiniSamplerCrashDumpHandler()
 {
     const auto desktop = juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getFullPathName();
@@ -57,8 +60,10 @@ MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
     writeDiagnostic("processor: constructor begin");
     formatManager.registerBasicFormats();
     writeDiagnostic("processor: formats registered");
-    for (auto i = 0; i < 16; ++i) synth.addVoice(new juce::SamplerVoice());
+    for (auto i = 0; i < 16; ++i)
+        synth.addVoice(new juce::SamplerVoice());
     writeDiagnostic("processor: voices added");
+
     juce::AudioBuffer<float> generatedSample(1, 22050);
     writeDiagnostic("processor: generated buffer allocated");
     auto* samples = generatedSample.getWritePointer(0);
@@ -67,24 +72,31 @@ MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
         const auto t = static_cast<double>(i) / 44100.0;
         samples[i] = static_cast<float>(std::sin(juce::MathConstants<double>::twoPi * 440.0 * t) * std::exp(-t * 7.0));
     }
-    juce::MemoryOutputStream wavData;
+
+    auto* wavData = new juce::MemoryOutputStream();
     juce::WavAudioFormat wavFormat;
-    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(&wavData, 44100.0, 1, 16, {}, 0));
+    std::unique_ptr<juce::AudioFormatWriter> writer(wavFormat.createWriterFor(wavData, 44100.0, 1, 16, {}, 0));
     writeDiagnostic(writer != nullptr ? "processor: wav writer created" : "processor: wav writer FAILED");
     if (writer != nullptr)
     {
         writer->writeFromAudioSampleBuffer(generatedSample, 0, generatedSample.getNumSamples());
-        writer.reset();
-        juce::MemoryInputStream input(wavData.getData(), wavData.getDataSize(), false);
-        std::unique_ptr<juce::AudioFormatReader> reader(wavFormat.createReaderFor(&input, false));
-        writeDiagnostic(reader != nullptr ? "processor: wav reader created" : "processor: wav reader FAILED");
-        if (reader != nullptr)
         {
-            juce::BigInteger notes;
-            notes.setRange(0, 128, true);
-            synth.addSound(new juce::SamplerSound("Generated test sample", *reader, notes, 60, 0.01, 0.2, 2.0));
-            writeDiagnostic("processor: generated sound added");
+            auto* input = new juce::MemoryInputStream(wavData->getData(), wavData->getDataSize(), false);
+            std::unique_ptr<juce::AudioFormatReader> reader(wavFormat.createReaderFor(input, true));
+            writeDiagnostic(reader != nullptr ? "processor: wav reader created" : "processor: wav reader FAILED");
+            if (reader != nullptr)
+            {
+                juce::BigInteger notes;
+                notes.setRange(0, 128, true);
+                synth.addSound(new juce::SamplerSound("Generated test sample", *reader, notes, 60, 0.01, 0.2, 2.0));
+                writeDiagnostic("processor: generated sound added");
+            }
         }
+        writer.reset();
+    }
+    else
+    {
+        delete wavData;
     }
     writeDiagnostic("processor: constructor complete");
 }
@@ -101,18 +113,23 @@ void MiniSamplerAudioProcessor::prepareToPlay(double sampleRate, int)
     const juce::ScopedLock lock(synthLock);
     synth.setCurrentPlaybackSampleRate(sampleRate);
 }
+
 void MiniSamplerAudioProcessor::releaseResources() {}
 
 bool MiniSamplerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
-    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono() && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo()) return false;
+    if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
+        && layouts.getMainOutputChannelSet() != juce::AudioChannelSet::stereo())
+        return false;
     return layouts.getMainInputChannelSet().isDisabled();
 }
 
 void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     static std::atomic<bool> firstProcessBlock { false };
-    if (!firstProcessBlock.exchange(true)) writeDiagnostic("processor: first processBlock channels=" + juce::String(buffer.getNumChannels()) + " samples=" + juce::String(buffer.getNumSamples()));
+    if (!firstProcessBlock.exchange(true))
+        writeDiagnostic("processor: first processBlock channels=" + juce::String(buffer.getNumChannels())
+                        + " samples=" + juce::String(buffer.getNumSamples()));
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
     const juce::ScopedLock lock(synthLock);
@@ -123,7 +140,8 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
 bool MiniSamplerAudioProcessor::loadSample(const juce::File& file)
 {
     std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
-    if (reader == nullptr) return false;
+    if (reader == nullptr)
+        return false;
     juce::BigInteger notes;
     notes.setRange(0, 128, true);
     auto* newSound = new juce::SamplerSound(file.getFileNameWithoutExtension(), *reader, notes, 60, 0.01, 0.2, 30.0);
