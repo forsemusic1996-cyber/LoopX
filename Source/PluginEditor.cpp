@@ -30,7 +30,7 @@ double MiniSamplerWaveformView::duration() const { return state.sample ? state.s
 double MiniSamplerWaveformView::visibleLength() const { return duration() / zoom; }
 juce::Rectangle<float> MiniSamplerWaveformView::waveArea() const
 {
-    return getLocalBounds().toFloat().withTrimmedTop(24.0f).withTrimmedBottom(14.0f).reduced(4.0f, 0.0f);
+    return getLocalBounds().toFloat().withTrimmedTop(24.0f).withTrimmedBottom(16.0f).reduced(4.0f, 0.0f);
 }
 float MiniSamplerWaveformView::xForTime(double time) const
 {
@@ -217,7 +217,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         if (startX >= area.getX() && startX <= area.getRight()) flags.addTriangle(startX, area.getY(), startX + 10, area.getY(), startX, area.getY() + 10);
         if (endX >= area.getX() && endX <= area.getRight()) flags.addTriangle(endX, area.getY(), endX - 10, area.getY(), endX, area.getY() + 10);
         g.fillPath(flags);
-        const auto loopBar = juce::Rectangle<float>(startX, area.getBottom(), endX - startX, 10.0f).getIntersection(getLocalBounds().toFloat());
+        const auto loopBar = juce::Rectangle<float>(startX, area.getBottom(), endX - startX, 12.0f).getIntersection(getLocalBounds().toFloat());
         g.setColour(juce::Colour(0xff426f74)); g.fillRoundedRectangle(loopBar, 2.0f);
         g.setColour(juce::Colour(0xff66cecd)); g.drawRoundedRectangle(loopBar, 2.0f, 1.0f);
     }
@@ -236,7 +236,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         if (line.getWidth() > 0)
         {
             g.setColour(juce::Colour(0xffe07a5f)); g.setFont(16.0f);
-            g.drawText(juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), static_cast<int>(line.getX()) + 2, getHeight() - 37, 24, 18, juce::Justification::centredLeft);
+            g.drawText(juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), static_cast<int>(line.getX()) + 2, getHeight() - 39, 24, 18, juce::Justification::centredLeft);
         }
     }
     if (cursor >= viewStart && cursor <= viewStart + visibleLength())
