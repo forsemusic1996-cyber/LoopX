@@ -150,11 +150,18 @@ private:
     struct AtomicLoop { std::atomic<double> start{0}, end{0}, beats{0}, fadeIn{0.004}, fadeOut{0.004}; };
     std::array<AtomicLoop, 11> regions;
     std::array<Loop, 11> rtRegions {};
+    std::atomic<unsigned> slotSelectionVersion{0};
+    std::atomic<int> requestedSlot{0};
+    unsigned lastSelectionVersion = 0;
+    int lastVelocity = -1;
     std::atomic<int> regionCount{0}, liveSlot{0}, playbackMode{0}, velocityMode{0}, liveGrid{3};
     std::atomic<bool> liveSnap{true}, liveTriplet{false};
     std::atomic<double> sourceOffset{0}, timelineTempo{0};
     std::atomic<double> livePosition{-1};
     LoopPlayback engine;
+    std::array<float, 2> outputTail{}, switchTail{};
+    int switchFade = 0;
+    bool previousValid = false;
     std::array<uint64_t, 2048> heldNotes {};
     uint64_t noteOrder = 0;
     double midiPhase = 0, gateGain = 0, expectedBeat = 0;
