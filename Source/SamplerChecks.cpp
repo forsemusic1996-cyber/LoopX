@@ -80,7 +80,14 @@ int main()
         p.setLoopSelection(0.5, 1.0, 1); wave->refreshFromProcessor();
         const auto slotBaseline = wave->createComponentSnapshot(wave->getLocalBounds());
         check(wave->getBottom() == editor->getHeight() - 4, "waveform fills editor down to bottom margin with no footer");
-        check(slotBaseline.getPixelAt(10, 5) == juce::Colour(0xff64798c), "scrollbar is above waveform and ruler");
+        check(slotBaseline.getPixelAt(10, 5) == juce::Colour(0xff484a4c)
+              && slotBaseline.getPixelAt(10, 21) == juce::Colour(0xff484a4c), "muted gray scrollbar fills full top strip");
+        bool labelOnWaveform = false;
+        const int labelX = 4 + static_cast<int>((wave->getWidth() - 8) * 0.75);
+        for (int y = 26; y < 40; ++y)
+            for (int x = labelX + 3; x < labelX + 30; ++x)
+                if (slotBaseline.getPixelAt(x, y).getRed() > 110) labelOnWaveform = true;
+        check(labelOnWaveform, "bar and beat numbers are drawn below scrollbar on waveform");
         editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::leftButtonModifier));
         auto slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
         const int slotX = 4 + static_cast<int>((wave->getWidth() - 8) * 0.35);
@@ -95,10 +102,16 @@ int main()
         p.setLoopSelection(0.25, 0.5, 0.5); wave->refreshFromProcessor();
         const float selectionA = 4.0f + (wave->getWidth() - 8) * 0.5f;
         const float selectionB = 4.0f + (wave->getWidth() - 8) * 0.75f;
+        const auto selectionBaseline = wave->createComponentSnapshot(wave->getLocalBounds());
         wave->mouseDown(eventFor(wave, selectionA, 100, juce::ModifierKeys::leftButtonModifier));
         wave->mouseDrag(eventFor(wave, selectionB, 100, juce::ModifierKeys::leftButtonModifier, true));
         wave->mouseUp(eventFor(wave, selectionB, 100, 0, true));
         const auto selectionImage = wave->createComponentSnapshot(wave->getLocalBounds());
+        const int tintX = static_cast<int>((selectionA + selectionB) * 0.5f) + 7, tintY = wave->getHeight() - 50;
+        const auto tint = selectionImage.getPixelAt(tintX, tintY);
+        const auto expectedTint = selectionBaseline.getPixelAt(tintX, tintY).overlaidWith(juce::Colour(0x90548787));
+        check(std::abs(tint.getRed() - expectedTint.getRed()) <= 2 && std::abs(tint.getGreen() - expectedTint.getGreen()) <= 2
+              && std::abs(tint.getBlue() - expectedTint.getBlue()) <= 2, "selection is lighter gray-teal, not blue");
         check(selectionImage.getPixelAt(static_cast<int>((selectionA + selectionB) * 0.5f), wave->getHeight() - 9) == juce::Colour(0xff101315)
               && p.getViewState().loop.start == 0.25, "pending selection has no bottom loop marker and does not move the active loop");
         wave->applySelection();
@@ -118,6 +131,13 @@ int main()
         const double expected = 0.25 + LoopMath::phase(0.5 + 255.0 * 120.0 / (60.0 * 48000.0), 2.0);
         check(std::abs(p.getPlaybackSeconds() - expected) < 0.000001, "playback cursor follows host PPQ at different sample rates");
         check(audio.getMagnitude(0, audio.getNumSamples()) > 0.01f, "loop produces audio");
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        const auto cursorImage = wave->createComponentSnapshot(wave->getLocalBounds());
+        bool cursorInScrollbar = false;
+        for (int y = 0; y < 24; ++y)
+            for (int x = 0; x < wave->getWidth(); ++x)
+                if (cursorImage.getPixelAt(x, y).getGreen() > 140) cursorInScrollbar = true;
+        check(!cursorInScrollbar, "turquoise playback cursor and labels never enter scrollbar");
         midi.addEvent(juce::MidiMessage::noteOn(1, 72, 1.0f), 0); p.processBlock(audio, midi);
         check(std::abs(p.getPlaybackSeconds() - expected) < 0.000001, "active loop stays original on a different MIDI note by default");
         midi.clear();
@@ -137,7 +157,10 @@ int main()
         check(std::abs(p.getViewState().loop.end - 1.25) < 0.000001, "multiply loop by two");
         wave->setMusicalLength(1);
         check(std::abs(p.getViewState().loop.beats - 1) < 0.000001, "Loop Length sets musical duration");
+        p.setDisplaySettings(false, true);
         editor.reset(); editor.reset(p.createEditor());
+        for (auto* child : editor->getChildren()) if (auto* found = dynamic_cast<MiniSamplerWaveformView*>(child)) wave = found;
+        check(!wave->brightGrid && wave->stereo, "editor reopen restores grid brightness and waveform mode");
         check(p.getViewState().sample != nullptr && p.getViewState().slots.size() == 1, "closing and reopening editor keeps sample and slots");
         juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
         std::atomic<bool> running { true }; std::atomic<int> blocks { 0 };
@@ -156,11 +179,12 @@ int main()
         running.store(false); audioThread.join();
         check(blocks.load() > 20 && elapsed < 15000, "live resize and waveform painting leave audio callbacks running");
         std::cout << "Resize stress: " << elapsed << " ms, " << blocks << " audio blocks\n";
-        p.setUiSettings(5, 3, false, true, true); p.setMidiKeyTracking(true);
+        p.setUiSettings(5, 3, false, true, true); p.setMidiKeyTracking(true); p.setDisplaySettings(false, true);
         juce::MemoryBlock saved; p.getStateInformation(saved);
         MiniSamplerAudioProcessor restored; restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize())); waitForLoad(restored);
         const auto restoredState = restored.getViewState();
-        check(restoredState.slots.size() == 1 && restoredState.grid == 5 && restoredState.zeroCross && restoredState.triplet && !restoredState.snap && restoredState.midiKeyTracking,
+        check(restoredState.slots.size() == 1 && restoredState.grid == 5 && restoredState.segments == 3 && restoredState.zeroCross
+              && restoredState.triplet && !restoredState.snap && restoredState.midiKeyTracking && !restoredState.brightGrid && restoredState.stereoWaveform,
               "DAW project state restores sample path, slots, grid, Snap and ZC");
         p.deleteSlot(0); check(p.getViewState().slots.empty(), "slot deletion");
         check(std::abs(LoopMath::phase(-0.5, 2) - 0.75) < 0.000001, "negative project PPQ wraps correctly");
