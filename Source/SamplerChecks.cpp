@@ -196,7 +196,11 @@ int main()
         p.processBlock(audio, midi); check(p.getViewState().loop.start == stored.start, "velocity selects slot before triggering");
         midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1, 60, juce::uint8(127)), 0); p.processBlock(audio, midi);
         p.processBlock(audio, midi); check(audio.getMagnitude(0, 256) == 0, "empty velocity slot is silent, never plays wrong material");
-        p.setPlaybackSettings(0, 0); p.selectSlot(0); p.setLoopSelection(0.2, 0.7, 1); p.setLoopFades(0.02, 0.03);
+        p.setPlaybackSettings(0, 0); p.selectSlot(0); p.setLoopSelection(0.2, 0.7, 1);
+        p.positionParameter->setValueNotifyingHost(0); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,60,1.0f),0);
+        p.processBlock(audio,midi);
+        check(p.getViewState().loop.start == 0, "writing Loop Position zero works even when parameter value was already zero");
+        p.setLoopSelection(0.2,0.7,1); p.setLoopFades(0.02, 0.03);
         check(p.getViewState().loop.fadeIn == 0.02 && p.getViewState().loop.fadeOut == 0.03, "independent loop fades are applied to engine state");
 
         // Fade drag changes audio fades independently of Snap.
