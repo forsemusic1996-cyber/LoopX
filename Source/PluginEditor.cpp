@@ -30,7 +30,7 @@ double MiniSamplerWaveformView::duration() const { return state.sample ? state.s
 double MiniSamplerWaveformView::visibleLength() const { return duration() / zoom; }
 juce::Rectangle<float> MiniSamplerWaveformView::waveArea() const
 {
-    return getLocalBounds().toFloat().withTrimmedTop(20.0f).withTrimmedBottom(55.0f).reduced(4.0f, 0.0f);
+    return getLocalBounds().toFloat().withTrimmedTop(24.0f).withTrimmedBottom(14.0f).reduced(4.0f, 0.0f);
 }
 float MiniSamplerWaveformView::xForTime(double time) const
 {
@@ -168,7 +168,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff101315));
     const auto area = waveArea();
-    g.setColour(juce::Colour(0xff21252a)); g.fillRect(0, 0, getWidth(), 23);
+    g.setColour(juce::Colour(0xff21252a)); g.fillRect(0, 0, getWidth(), 24);
     if (!state.sample)
     {
         g.setColour(juce::Colour(0xffa6b1bc)); g.setFont(14.0f);
@@ -192,7 +192,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         g.setColour(bar ? juce::Colour(brightGrid ? 0xff519b9d : 0xff375b5e)
                         : juce::Colour(brightGrid ? 0xff343f42 : 0xff252d30));
         g.drawVerticalLine(static_cast<int>(x), area.getY(), area.getBottom());
-        if (bar) { g.setFont(11.0f); g.drawText(juce::String(static_cast<int>(std::round(t / barSeconds)) + 1), static_cast<int>(x) + 3, 2, 48, 18, juce::Justification::centredLeft); }
+        if (bar) { g.setFont(11.0f); g.drawText(juce::String(static_cast<int>(std::round(t / barSeconds)) + 1), static_cast<int>(x) + 3, 10, 48, 14, juce::Justification::centredLeft); }
     }
     if (state.segments > 1)
     {
@@ -217,7 +217,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         if (startX >= area.getX() && startX <= area.getRight()) flags.addTriangle(startX, area.getY(), startX + 10, area.getY(), startX, area.getY() + 10);
         if (endX >= area.getX() && endX <= area.getRight()) flags.addTriangle(endX, area.getY(), endX - 10, area.getY(), endX, area.getY() + 10);
         g.fillPath(flags);
-        const auto loopBar = juce::Rectangle<float>(startX, getHeight() - 27.0f, endX - startX, 10.0f).getIntersection(getLocalBounds().toFloat());
+        const auto loopBar = juce::Rectangle<float>(startX, area.getBottom(), endX - startX, 10.0f).getIntersection(getLocalBounds().toFloat());
         g.setColour(juce::Colour(0xff426f74)); g.fillRoundedRectangle(loopBar, 2.0f);
         g.setColour(juce::Colour(0xff66cecd)); g.drawRoundedRectangle(loopBar, 2.0f, 1.0f);
     }
@@ -231,19 +231,19 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
     {
         const auto& slot = state.slots[i];
         const float a = xForTime(slot.start), b = xForTime(slot.end);
-        const auto line = juce::Rectangle<float>(a, getHeight() - 35.0f, b - a, 3.0f).getIntersection(getLocalBounds().toFloat());
-        g.setColour(juce::Colour(0xffcfbb80)); g.fillRect(line);
+        const auto line = juce::Rectangle<float>(a, area.getBottom() - 4.0f, b - a, 3.0f).getIntersection(area);
+        g.setColour(juce::Colour(0xffe07a5f)); g.fillRect(line);
         if (line.getWidth() > 0)
         {
-            g.setColour(juce::Colour(0xfff0dfa8)); g.setFont(16.0f);
-            g.drawText(juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), static_cast<int>(line.getX()) + 2, getHeight() - 54, 24, 18, juce::Justification::centredLeft);
+            g.setColour(juce::Colour(0xffe07a5f)); g.setFont(16.0f);
+            g.drawText(juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), static_cast<int>(line.getX()) + 2, getHeight() - 37, 24, 18, juce::Justification::centredLeft);
         }
     }
     if (cursor >= viewStart && cursor <= viewStart + visibleLength())
     {
-        g.setColour(juce::Colour(0xffffdf5d)); g.drawLine(xForTime(cursor), 0, xForTime(cursor), area.getBottom(), 2.0f);
+        g.setColour(juce::Colour(0xffffdf5d)); g.drawLine(xForTime(cursor), 10.0f, xForTime(cursor), area.getBottom(), 2.0f);
     }
-    const auto track = juce::Rectangle<float>(4.0f, getHeight() - 11.0f, getWidth() - 8.0f, 7.0f);
+    const auto track = juce::Rectangle<float>(4.0f, 2.0f, getWidth() - 8.0f, 7.0f);
     const float thumbWidth = juce::jmax(18.0f, track.getWidth() / static_cast<float>(zoom));
     const float thumbX = track.getX() + static_cast<float>(viewStart / juce::jmax(1.0e-9, duration() - visibleLength())) * (track.getWidth() - thumbWidth);
     g.setColour(juce::Colour(0xff303741)); g.fillRoundedRectangle(track, 3.0f);
@@ -302,7 +302,7 @@ void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
     dragStart = event.x; dragLoopStart = state.loop.start; dragLoopEnd = state.loop.end; dragViewStart = viewStart;
     if (event.mods.isMiddleButtonDown()) { dragMode = 5; return; }
     if (!event.mods.isLeftButtonDown()) return;
-    if (event.y >= getHeight() - 14)
+    if (event.y >= 0 && event.y <= 11 && event.x >= 4 && event.x <= getWidth() - 4)
     {
         const double trackWidth = juce::jmax(1, getWidth() - 8);
         const double thumbWidth = juce::jmax(18.0, trackWidth / zoom);
@@ -316,7 +316,7 @@ void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
         dragViewStart = viewStart; dragMode = 6; repaint(); return;
     }
     const bool loopValid = state.loop.end > state.loop.start;
-    if (event.y >= getHeight() - 31 && loopValid && event.x >= xForTime(state.loop.start) && event.x <= xForTime(state.loop.end)) dragMode = 4;
+    if (event.y >= waveArea().getBottom() && event.y < getHeight() - 4 && loopValid && event.x >= xForTime(state.loop.start) && event.x <= xForTime(state.loop.end)) dragMode = 4;
     else if (loopValid && std::abs(event.x - xForTime(state.loop.start)) <= 6) dragMode = 2;
     else if (loopValid && std::abs(event.x - xForTime(state.loop.end)) <= 6) dragMode = 3;
     else
@@ -420,7 +420,7 @@ void MiniSamplerAudioProcessorEditor::layoutTools()
 }
 void MiniSamplerAudioProcessorEditor::resized()
 {
-    waveform.setBounds(4, 28, getWidth() - 8, juce::jmax(10, getHeight() - 54));
+    waveform.setBounds(4, 28, getWidth() - 8, juce::jmax(10, getHeight() - 32));
     layoutTools(); processor.setEditorSize(getWidth(), getHeight());
 }
 void MiniSamplerAudioProcessorEditor::paint(juce::Graphics& g)
@@ -433,14 +433,7 @@ void MiniSamplerAudioProcessorEditor::paint(juce::Graphics& g)
         g.setColour(tool.active ? juce::Colour(0xff66cecd) : juce::Colour(0xff657577)); g.drawRoundedRectangle(tool.rect.toFloat(), 2.0f, 1.0f);
         g.setColour(juce::Colour(0xffe1e7ed)); g.drawText(tool.text, tool.rect, juce::Justification::centred);
     }
-    g.setColour(juce::Colour(0xffa8b4c2));
-    g.setFont(11.0f);
-    const int bottom = getHeight() - 23;
-    g.drawText("Mini Sampler / LoopX v0.2  |  " + state.status, 10, bottom, getWidth() - 260, 19, juce::Justification::centredLeft);
-    const auto tempo = processor.getProjectTempo();
-    const auto host = processor.hasHostPosition() ? (processor.isHostPlaying() ? "PLAY" : "STOP") : "PREVIEW";
-    g.drawText(juce::String(state.loop.beats, 2) + " beats  |  " + juce::String(tempo, 1) + " BPM  " + host,
-               getWidth() - 250, bottom, 240, 19, juce::Justification::centredRight);
+
 }
 void MiniSamplerAudioProcessorEditor::timerCallback()
 {
@@ -448,9 +441,9 @@ void MiniSamplerAudioProcessorEditor::timerCallback()
     state = processor.getViewState();
     if (previous.slots.size() != state.slots.size() || previous.loop.start != state.loop.start || previous.loop.end != state.loop.end
         || previous.grid != state.grid || previous.segments != state.segments || previous.snap != state.snap || previous.zeroCross != state.zeroCross
-        || previous.triplet != state.triplet || previous.status != state.status || lastPlaying != processor.isLooping())
-    { layoutTools(); repaint(0, 0, getWidth(), 38); repaint(0, getHeight() - 25, getWidth(), 25); }
-    if (lastTempo != processor.getProjectTempo()) { waveform.repaint(); repaint(0, getHeight() - 25, getWidth(), 25); }
+        || previous.triplet != state.triplet || lastPlaying != processor.isLooping())
+    { layoutTools(); repaint(0, 0, getWidth(), 28); }
+    if (lastTempo != processor.getProjectTempo()) waveform.repaint();
     lastTempo = processor.getProjectTempo(); lastPlaying = processor.isLooping();
 }
 void MiniSamplerAudioProcessorEditor::chooseFile()
