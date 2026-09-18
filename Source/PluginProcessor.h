@@ -81,7 +81,7 @@ public:
         std::vector<Loop> slots;
         int grid = 3, segments = 1;
         bool snap = true, triplet = false, zeroCross = false, midiKeyTracking = false;
-        bool brightGrid = true, stereoWaveform = false;
+        bool brightGrid = false, stereoWaveform = false;
         int width = 1000, height = 390;
         juce::String status;
     };
