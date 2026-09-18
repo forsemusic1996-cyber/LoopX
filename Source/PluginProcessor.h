@@ -4,6 +4,7 @@
 #include <array>
 #include "LoopMath.h"
 #include "LoopPlayback.h"
+#include "ThemeColours.h"
 
 struct MiniSamplerSample
 {
@@ -12,15 +13,17 @@ struct MiniSamplerSample
     juce::File file;
     struct PeakLevel { int64_t stride = 64; std::vector<std::pair<float, float>> values; };
     std::array<std::vector<PeakLevel>, 2> peaks;
-    void buildWaveform()
+    bool buildWaveform(const std::function<bool()>& cancelled = {})
     {
         for (int ch = 0; ch < audio.getNumChannels(); ++ch)
         {
             auto& levels = peaks[static_cast<size_t>(ch)];
+            levels.clear();
             PeakLevel base;
             const auto* data = audio.getReadPointer(ch);
             for (int64_t a = 0; a < audio.getNumSamples(); a += 64)
             {
+                if ((a % 65536) == 0 && cancelled && cancelled()) return false;
                 float low = data[a], high = low;
                 for (int64_t i = a + 1; i < juce::jmin<int64_t>(a + 64, audio.getNumSamples()); ++i)
                 { low = juce::jmin(low, data[i]); high = juce::jmax(high, data[i]); }
@@ -33,6 +36,7 @@ struct MiniSamplerSample
                 PeakLevel next; next.stride = previous.stride * 4;
                 for (size_t a = 0; a < previous.values.size(); a += 4)
                 {
+                    if ((a % 1024) == 0 && cancelled && cancelled()) return false;
                     auto range = previous.values[a];
                     for (size_t i = a + 1; i < juce::jmin(a + 4, previous.values.size()); ++i)
                     { range.first = juce::jmin(range.first, previous.values[i].first); range.second = juce::jmax(range.second, previous.values[i].second); }
@@ -41,6 +45,7 @@ struct MiniSamplerSample
                 levels.push_back(std::move(next));
             }
         }
+        return true;
     }
     std::pair<float, float> waveformRange(int channel, int first, int last) const
     {
@@ -71,7 +76,7 @@ struct MiniSamplerSample
     double duration() const { return audio.getNumSamples() / rate; }
 };
 
-class MiniSamplerAudioProcessor final : public juce::AudioProcessor, private juce::Thread
+class MiniSamplerAudioProcessor final : public juce::AudioProcessor, private juce::Thread, private juce::AsyncUpdater
 {
 public:
     struct Loop { double start = 0.0, end = 0.0, beats = 0.0, fadeIn = 0.004, fadeOut = 0.004; };
@@ -84,13 +89,18 @@ public:
         int grid = 3, segments = 1;
         bool snap = true, triplet = false, zeroCross = false, midiKeyTracking = false;
         bool brightGrid = false, stereoWaveform = false;
-        int playbackMode = 0, theme = 0, velocityMode = 0;
+        int playbackMode = 0, theme = 0, velocityMode = 0, noteMode = 0, rootNote = 60;
+        LoopXPalette palette = loopXPalette(0);
+        bool customTheme = false;
+        juce::String themeName = "Studio Dark";
+        std::vector<juce::var> userThemes;
         double startOffset = 0, playbackOffset = 0, originalBpm = 120, targetBpm = 120;
         bool stretchApplied = false;
         int width = 1000, height = 390;
         juce::String status;
     };
-    MiniSamplerAudioProcessor();
+    static juce::File defaultPreferencesFile();
+    explicit MiniSamplerAudioProcessor(juce::File preferences = defaultPreferencesFile());
     ~MiniSamplerAudioProcessor() override;
     void prepareToPlay(double, int) override;
     void releaseResources() override {}
@@ -115,6 +125,7 @@ public:
     ViewState getViewState() const;
     void setLoopSelection(double start, double end, double beats = 0.0);
     void stopLoop();
+    void setLoopEnabled(bool);
     bool isLooping() const { return loopEnabled.load(); }
     void saveSlot();
     void recallSlot(int);
@@ -123,6 +134,15 @@ public:
     void setDisplaySettings(bool brightGrid, bool stereoWaveform);
     void setPlaybackSettings(int mode, int velocityMode);
     void setTheme(int);
+    void setCustomTheme(const LoopXPalette&, juce::String name);
+    void saveUserTheme(juce::String name);
+    bool renameUserTheme(int, juce::String);
+    bool loadUserTheme(int);
+    bool importTheme(const juce::String&);
+    juce::String exportTheme() const;
+    void setNoteSettings(int mode, int root);
+    std::optional<juce::String> getNameForMidiNoteNumber(int, int) override;
+    static juce::String noteLabel(int note) { return juce::MidiMessage::getMidiNoteName(note, true, true, 3); }
     void setLoopFades(double fadeIn, double fadeOut);
     void setStartOffset(double);
     bool matchBpm(double original);
@@ -140,12 +160,19 @@ public:
     bool hasHostPosition() const { return hostConnected.load(); }
     void setMidiKeyTracking(bool enabled)
     {
-        const juce::ScopedLock lock(stateLock);
-        state.midiKeyTracking = enabled; midiKeyTracking.store(enabled);
-        updateHostDisplay(ChangeDetails{}.withNonParameterStateChanged(true));
+        { const juce::ScopedLock lock(stateLock); state.midiKeyTracking = enabled; midiKeyTracking.store(enabled); }
+        uiChanged();
     }
 private:
     void run() override;
+    void handleAsyncUpdate() override;
+    void uiChanged();
+    void loadPreferences();
+    void flushPreferences();
+    juce::var preferencesJson() const;
+    void applyPreferences(const juce::var&);
+    juce::File preferencesFile;
+    std::atomic<bool> preferencesDirty{false};
     void publishLoop(const Loop&);
     struct AtomicLoop { std::atomic<double> start{0}, end{0}, beats{0}, fadeIn{0.004}, fadeOut{0.004}; };
     std::array<AtomicLoop, 11> regions;
@@ -154,6 +181,8 @@ private:
     unsigned lastSelectionVersion = 0;
     int lastVelocity = -1;
     std::atomic<int> regionCount{0}, liveSlot{0}, playbackMode{0}, velocityMode{0}, liveGrid{3};
+    std::atomic<int> noteMode{0}, rootNote{60};
+    std::atomic<double> notePosition{-1};
     std::atomic<bool> liveSnap{true}, liveTriplet{false};
     std::atomic<double> sourceOffset{0}, timelineTempo{0};
     std::atomic<double> livePosition{-1};
