@@ -45,7 +45,6 @@ MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
                 writeDiagnostic("processor: generated sound added");
             }
         }
-
         writer.reset();
     }
     else
@@ -87,6 +86,21 @@ bool MiniSamplerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout
 void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer,
                                              juce::MidiBuffer& midiMessages)
 {
+    if (auto* playHead = getPlayHead())
+    {
+        if (const auto position = playHead->getPosition())
+        {
+            if (const auto bpm = position->getBpm(); bpm.hasValue() && *bpm > 0.0)
+                projectTempo.store(*bpm);
+
+            if (const auto timeSignature = position->getTimeSignature(); timeSignature.hasValue())
+            {
+                timeSignatureNumerator.store(timeSignature->numerator);
+                timeSignatureDenominator.store(timeSignature->denominator);
+            }
+        }
+    }
+
     static std::atomic<bool> firstProcessBlock { false };
     if (!firstProcessBlock.exchange(true))
         writeDiagnostic("processor: first processBlock channels=" + juce::String(buffer.getNumChannels())
