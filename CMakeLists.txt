@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MiniSampler VERSION 0.3.0)
+project(MiniSampler VERSION 0.4.0)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -62,6 +62,7 @@ target_compile_definitions(MiniSampler
 target_link_libraries(MiniSampler
     PRIVATE
         juce::juce_audio_utils
+        juce::juce_gui_extra
         signalsmith_stretch_headers
     PUBLIC
         juce::juce_recommended_config_flags
@@ -75,12 +76,13 @@ juce_generate_juce_header(MiniSamplerChecks)
 target_sources(MiniSamplerChecks PRIVATE Source/SamplerChecks.cpp)
 target_include_directories(MiniSamplerChecks PRIVATE Source)
 target_compile_definitions(MiniSamplerChecks PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
-target_link_libraries(MiniSamplerChecks PRIVATE MiniSampler juce::juce_audio_utils signalsmith_stretch_headers)
+target_link_libraries(MiniSamplerChecks PRIVATE MiniSampler juce::juce_audio_utils juce::juce_gui_extra signalsmith_stretch_headers)
 # Keep both upstream MIT notices in every build artifact.
 configure_file(${signalsmith_stretch_SOURCE_DIR}/LICENSE.txt ${CMAKE_BINARY_DIR}/Signalsmith-Stretch-LICENSE.txt COPYONLY)
 configure_file(${signalsmith_stretch_SOURCE_DIR}/dsp/LICENSE.txt ${CMAKE_BINARY_DIR}/Signalsmith-DSP-LICENSE.txt COPYONLY)
 enable_testing()
 add_test(NAME MiniSamplerChecks COMMAND MiniSamplerChecks)
+set_tests_properties(MiniSamplerChecks PROPERTIES TIMEOUT 90)
 add_executable(EngineChecks Source/EngineChecks.cpp)
 target_compile_features(EngineChecks PRIVATE cxx_std_17)
 target_link_libraries(EngineChecks PRIVATE signalsmith_stretch_headers)
