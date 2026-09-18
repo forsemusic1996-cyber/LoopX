@@ -74,7 +74,7 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     if (velocity != lastVelocity) { selectedSlot = parameterSlot; lastVelocity = velocity; midiPhase = 0; }
     const auto selectionVersion = slotSelectionVersion.load();
     if (selectionVersion != lastSelectionVersion)
-    { selectedSlot = requestedSlot.load(); lastSelectionVersion = selectionVersion; midiPhase = 0; }
+    { selectedSlot = parameterSlot; lastSelectionVersion = selectionVersion; midiPhase = 0; }
     if (parameterSlot != lastParameterSlot)
     { selectedSlot = parameterSlot; lastParameterSlot = parameterSlot; livePosition.store(-1); midiPhase = 0; }
     const float position = positionParameter->get();
