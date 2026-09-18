@@ -498,6 +498,7 @@ void MiniSamplerAudioProcessorEditor::menuFor(int id)
         menu.addItem(4, "Show full sample / reset zoom");
         menu.addSeparator();
         menu.addItem(5, "Help: mouse and keyboard");
+        menu.addItem(6, "MIDI notes change speed / pitch", true, state.midiKeyTracking);
     }
     juce::Component::SafePointer<MiniSamplerAudioProcessorEditor> safe(this);
     menu.showMenuAsync(miniSamplerMenuOptions(*this, menuPosition), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
@@ -514,6 +515,7 @@ void MiniSamplerAudioProcessorEditor::handleMenu(int id, int result)
         if (result == 2) { waveform.stereo = !waveform.stereo; waveform.resetZoom(); }
         if (result == 3) { waveform.brightGrid = !waveform.brightGrid; waveform.repaint(); }
         if (result == 4) waveform.resetZoom();
+        if (result == 6) processor.setMidiKeyTracking(!state.midiKeyTracking);
         if (result == 5) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "Mini Sampler / LoopX",
             "Drag a local audio file onto the waveform.\nDrag to select; SET or right-click applies the loop.\nDrag orange markers to resize; drag the bottom loop bar to move.\nSegments: click a whole segment. + saves a slot (up to 10).\nLeft-click slot recalls; right-click deletes. Keys 1-9/0 recall.\nLeft/Right nudge by grid; Up/Down move one loop length.\nMouse wheel zooms; Shift+wheel or middle-drag pans.\nSnap has priority over ZC (nearest crossing within 5 ms).\nLoop follows DAW Play/Stop/seek and BPM; tempo changes use varispeed.\nSamples are linked by file path, not embedded in the project.");
     }
