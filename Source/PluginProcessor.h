@@ -34,6 +34,9 @@ public:
 
     bool loadSample(const juce::File& file);
     juce::String getLoadedSampleName() const;
+    double getProjectTempo() const noexcept { return projectTempo.load(); }
+    int getProjectTimeSignatureNumerator() const noexcept { return timeSignatureNumerator.load(); }
+    int getProjectTimeSignatureDenominator() const noexcept { return timeSignatureDenominator.load(); }
     juce::MidiKeyboardState& getKeyboardState() { return keyboardState; }
     void writeDiagnostic(const juce::String& message) const;
 
@@ -43,6 +46,9 @@ private:
     juce::MidiKeyboardState keyboardState;
     mutable juce::CriticalSection synthLock;
     juce::String loadedSampleName { "No sample loaded" };
+    std::atomic<double> projectTempo { 120.0 };
+    std::atomic<int> timeSignatureNumerator { 4 };
+    std::atomic<int> timeSignatureDenominator { 4 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerAudioProcessor)
 };
