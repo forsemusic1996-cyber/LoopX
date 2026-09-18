@@ -33,13 +33,24 @@ jobs:
         shell: pwsh
         run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
 
+      - name: Package VST3 and dependency licenses
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package -Force | Out-Null
+          $bundles = Get-ChildItem -Path build -Filter "*.vst3" -Directory -Recurse | Where-Object { $_.Parent.Name -eq "VST3" -and $_.Parent.Parent.Name -eq "RelWithDebInfo" }
+          if (-not $bundles) { throw "No VST3 bundle found" }
+          foreach ($bundle in $bundles) {
+            Copy-Item -LiteralPath $bundle.FullName -Destination package -Recurse
+            $resources = Join-Path (Join-Path package $bundle.Name) "Contents/Resources"
+            New-Item -ItemType Directory -Path $resources -Force | Out-Null
+            Copy-Item -Path build/Signalsmith-*-LICENSE.txt -Destination $resources
+          }
+
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
           name: MiniSampler-VST3
-          path: |
-            build/**/RelWithDebInfo/VST3/*.vst3
-            build/Signalsmith-*-LICENSE.txt
+          path: package/*.vst3
           if-no-files-found: error
 
       - name: Upload debug symbols
