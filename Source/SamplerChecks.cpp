@@ -78,14 +78,17 @@ int main()
                 1.0f, 0, 0, 0, 0, component, component, juce::Time::getCurrentTime(), { x, y }, juce::Time::getCurrentTime(), 1, dragging);
         };
         p.setLoopSelection(0.5, 1.0, 1); wave->refreshFromProcessor();
+        const auto slotBaseline = wave->createComponentSnapshot(wave->getLocalBounds());
+        check(wave->getBottom() == editor->getHeight() - 4, "waveform fills editor down to bottom margin with no footer");
+        check(slotBaseline.getPixelAt(10, 5) == juce::Colour(0xff64798c), "scrollbar is above waveform and ruler");
         editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::leftButtonModifier));
         auto slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
         const int slotX = 4 + static_cast<int>((wave->getWidth() - 8) * 0.35);
-        check(slotImage.getPixelAt(slotX, wave->getHeight() - 34) == juce::Colour(0xffcfbb80), "slot line appears immediately without playback or timer");
-        check(slotImage.getPixelAt(slotX, wave->getHeight() - 30) == juce::Colour(0xff101315), "slot marker is only three pixels thick");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 17) == juce::Colour(0xffe07a5f), "coral slot line overlays waveform immediately without playback or timer");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 14) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 14), "slot marker is only three pixels thick and does not occupy loop bar");
         editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::rightButtonModifier));
         slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
-        check(p.getViewState().slots.empty() && slotImage.getPixelAt(slotX, wave->getHeight() - 34) == juce::Colour(0xff101315),
+        check(p.getViewState().slots.empty() && slotImage.getPixelAt(slotX, wave->getHeight() - 17) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 17),
               "deleting slot removes its line immediately without playback");
         p.setLoopSelection(0.25, 0.5, 0.5); wave->refreshFromProcessor();
         const float selectionA = 4.0f + (wave->getWidth() - 8) * 0.5f;
@@ -94,7 +97,7 @@ int main()
         wave->mouseDrag(eventFor(wave, selectionB, 100, juce::ModifierKeys::leftButtonModifier, true));
         wave->mouseUp(eventFor(wave, selectionB, 100, 0, true));
         const auto selectionImage = wave->createComponentSnapshot(wave->getLocalBounds());
-        check(selectionImage.getPixelAt(static_cast<int>((selectionA + selectionB) * 0.5f), wave->getHeight() - 22) == juce::Colour(0xff101315)
+        check(selectionImage.getPixelAt(static_cast<int>((selectionA + selectionB) * 0.5f), wave->getHeight() - 9) == juce::Colour(0xff101315)
               && p.getViewState().loop.start == 0.25, "pending selection has no bottom loop marker and does not move the active loop");
         wave->applySelection();
 
