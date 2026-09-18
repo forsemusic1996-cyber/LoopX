@@ -370,7 +370,10 @@ int main()
         p.setUiSettings(6,4,false,false,true); p.setDisplaySettings(true,true); p.setNoteSettings(1,48);
         juce::MemoryBlock completeState; p.getStateInformation(completeState);
         MiniSamplerAudioProcessor fresh(juce::File{}); fresh.setTheme(4); fresh.setUiSettings(1,1,true,false,false);
-        fresh.setStateInformation(completeState.getData(),int(completeState.getSize())); waitForLoad(fresh);
+        StateQueryHost restoreHost; fresh.addListener(&restoreHost);
+        fresh.setStateInformation(completeState.getData(),int(completeState.getSize()));
+        check(restoreHost.changes==0,"state restore does not synchronously notify host under state lock");
+        fresh.removeListener(&restoreHost); waitForLoad(fresh);
         const auto complete=fresh.getViewState();
         check(complete.palette==palette && complete.customTheme && complete.themeName=="Renamed Studio" && complete.grid==6 && complete.segments==4 &&
               !complete.snap && complete.zeroCross && complete.brightGrid && complete.stereoWaveform && complete.noteMode==1 && complete.rootNote==48,
