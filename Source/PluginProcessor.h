@@ -151,7 +151,6 @@ private:
     std::array<AtomicLoop, 11> regions;
     std::array<Loop, 11> rtRegions {};
     std::atomic<unsigned> slotSelectionVersion{0};
-    std::atomic<int> requestedSlot{0};
     unsigned lastSelectionVersion = 0;
     int lastVelocity = -1;
     std::atomic<int> regionCount{0}, liveSlot{0}, playbackMode{0}, velocityMode{0}, liveGrid{3};
@@ -166,7 +165,6 @@ private:
     uint64_t noteOrder = 0;
     double midiPhase = 0, gateGain = 0, expectedBeat = 0;
     int selectedSlot = 0, lastParameterSlot = -1, lastMode = -1;
-    float lastPositionParameter = 0;
     double outputRate = 44100.0, fallbackBeat = 0.0;
     int loopMidiNote = 60;
     Loop audioLoop;
