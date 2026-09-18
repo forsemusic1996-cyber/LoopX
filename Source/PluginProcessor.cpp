@@ -226,8 +226,20 @@ void MiniSamplerAudioProcessor::deleteSlot(int index)
 }
 void MiniSamplerAudioProcessor::setUiSettings(int grid, int segments, bool snap, bool triplet, bool zeroCross)
 {
-    const juce::ScopedLock lock(stateLock);
-    state.grid = grid; state.segments = segments; state.snap = snap; state.triplet = triplet; state.zeroCross = zeroCross;
+    {
+        const juce::ScopedLock lock(stateLock);
+        state.grid = juce::jlimit(1, 6, grid); state.segments = juce::jlimit(1, 5, segments);
+        state.snap = snap; state.triplet = triplet; state.zeroCross = zeroCross;
+    }
+    updateHostDisplay(ChangeDetails{}.withNonParameterStateChanged(true));
+}
+void MiniSamplerAudioProcessor::setDisplaySettings(bool brightGrid, bool stereoWaveform)
+{
+    {
+        const juce::ScopedLock lock(stateLock);
+        state.brightGrid = brightGrid; state.stereoWaveform = stereoWaveform;
+    }
+    updateHostDisplay(ChangeDetails{}.withNonParameterStateChanged(true));
 }
 void MiniSamplerAudioProcessor::setEditorSize(int width, int height)
 {
@@ -243,6 +255,7 @@ void MiniSamplerAudioProcessor::getStateInformation(juce::MemoryBlock& block)
     xml.setAttribute("enabled", loopEnabled.load()); xml.setAttribute("grid", state.grid); xml.setAttribute("segments", state.segments);
     xml.setAttribute("snap", state.snap); xml.setAttribute("triplet", state.triplet); xml.setAttribute("zeroCross", state.zeroCross);
     xml.setAttribute("midiKeyTracking", state.midiKeyTracking);
+    xml.setAttribute("brightGrid", state.brightGrid); xml.setAttribute("stereoWaveform", state.stereoWaveform);
     xml.setAttribute("width", state.width); xml.setAttribute("height", state.height);
     for (const auto& slot : state.slots)
     {
@@ -265,6 +278,7 @@ void MiniSamplerAudioProcessor::setStateInformation(const void* data, int size)
     state.grid = juce::jlimit(1, 6, xml->getIntAttribute("grid", 3)); state.segments = juce::jlimit(1, 5, xml->getIntAttribute("segments", 1));
     state.snap = xml->getBoolAttribute("snap", true); state.triplet = xml->getBoolAttribute("triplet"); state.zeroCross = xml->getBoolAttribute("zeroCross");
     state.midiKeyTracking = xml->getBoolAttribute("midiKeyTracking", false); midiKeyTracking.store(state.midiKeyTracking);
+    state.brightGrid = xml->getBoolAttribute("brightGrid", true); state.stereoWaveform = xml->getBoolAttribute("stereoWaveform", false);
     state.width = juce::jlimit(720, 1800, xml->getIntAttribute("width", 1000)); state.height = juce::jlimit(260, 1100, xml->getIntAttribute("height", 390));
     publishLoop(state.loop); loopEnabled.store(xml->getBoolAttribute("enabled"));
     const juce::File file(xml->getStringAttribute("file"));
