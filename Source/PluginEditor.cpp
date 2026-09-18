@@ -241,7 +241,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
     }
     if (cursor >= viewStart && cursor <= viewStart + visibleLength())
     {
-        g.setColour(juce::Colour(0xffffdf5d)); g.drawLine(xForTime(cursor), 10.0f, xForTime(cursor), area.getBottom(), 2.0f);
+        g.setColour(juce::Colour(0xff66cecd)); g.drawLine(xForTime(cursor), 10.0f, xForTime(cursor), area.getBottom(), 2.0f);
     }
     const auto track = juce::Rectangle<float>(4.0f, 2.0f, getWidth() - 8.0f, 7.0f);
     const float thumbWidth = juce::jmax(18.0f, track.getWidth() / static_cast<float>(zoom));
