@@ -37,7 +37,7 @@ public:
     void resetZoom();
     void refreshFromProcessor() { refresh(); repaint(); }
     bool stereo = false;
-    bool brightGrid = true;
+    bool brightGrid = false;
     std::function<void()> onChanged;
 private:
     void timerCallback() override;
