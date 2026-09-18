@@ -68,7 +68,7 @@ int main()
             for (int i = interval.first; i < interval.second; ++i) { low = juce::jmin(low, data[i]); high = juce::jmax(high, data[i]); }
             check(actual.first == low && actual.second == high, "waveform cache returns EXACT original peaks including unaligned edges");
         }
-        const auto anchor = editor->localPointToGlobal({ 420, 12 });
+        const auto anchor = editor->localPointToGlobal(juce::Point<int>{ 420, 12 });
         const auto options = miniSamplerMenuOptions(*editor, anchor);
         check(options.getParentComponent() == editor.get() && options.getTargetScreenArea().getPosition() == anchor,
               "popup is constrained to plugin editor and anchored at clicked cursor position");
