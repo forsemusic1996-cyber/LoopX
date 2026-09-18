@@ -58,11 +58,64 @@ int main()
         waveDrop->fileDragEnter(paths, 50, 50);
         const auto loadedHover = wave->createComponentSnapshot(wave->getLocalBounds());
         check(loadedHover.getPixelAt(0, 40).getGreen() > 150, "loaded waveform shows visible drag highlight"); waveDrop->fileDragExit(paths);
+
+        const auto loaded = p.getViewState().sample;
+        for (const auto interval : { std::pair<int, int>{ 129, 9131 }, { 410, 413 }, { 0, 88200 }, { 65537, 88111 } })
+        {
+            const auto actual = loaded->waveformRange(0, interval.first, interval.second);
+            const auto* data = loaded->audio.getReadPointer(0);
+            float low = data[interval.first], high = low;
+            for (int i = interval.first; i < interval.second; ++i) { low = juce::jmin(low, data[i]); high = juce::jmax(high, data[i]); }
+            check(actual.first == low && actual.second == high, "waveform cache returns EXACT original peaks including unaligned edges");
+        }
+        const auto anchor = editor->localPointToGlobal({ 420, 12 });
+        const auto options = miniSamplerMenuOptions(*editor, anchor);
+        check(options.getParentComponent() == editor.get() && options.getTargetScreenArea().getPosition() == anchor,
+              "popup is constrained to plugin editor and anchored at clicked cursor position");
+        const auto eventFor = [](juce::Component* component, float x, float y, int modifiers, bool dragging = false)
+        {
+            return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(), { x, y }, juce::ModifierKeys(modifiers),
+                1.0f, 0, 0, 0, 0, component, component, juce::Time::getCurrentTime(), { x, y }, juce::Time::getCurrentTime(), 1, dragging);
+        };
+        p.setLoopSelection(0.5, 1.0, 1); wave->refreshFromProcessor();
+        editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::leftButtonModifier));
+        auto slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
+        const int slotX = 4 + static_cast<int>((wave->getWidth() - 8) * 0.35);
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 34) == juce::Colour(0xffcfbb80), "slot line appears immediately without playback or timer");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 30) == juce::Colour(0xff101315), "slot marker is only three pixels thick");
+        editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::rightButtonModifier));
+        slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
+        check(p.getViewState().slots.empty() && slotImage.getPixelAt(slotX, wave->getHeight() - 34) == juce::Colour(0xff101315),
+              "deleting slot removes its line immediately without playback");
+        p.setLoopSelection(0.25, 0.5, 0.5); wave->refreshFromProcessor();
+        const float selectionA = 4.0f + (wave->getWidth() - 8) * 0.5f;
+        const float selectionB = 4.0f + (wave->getWidth() - 8) * 0.75f;
+        wave->mouseDown(eventFor(wave, selectionA, 100, juce::ModifierKeys::leftButtonModifier));
+        wave->mouseDrag(eventFor(wave, selectionB, 100, juce::ModifierKeys::leftButtonModifier, true));
+        wave->mouseUp(eventFor(wave, selectionB, 100, 0, true));
+        const auto selectionImage = wave->createComponentSnapshot(wave->getLocalBounds());
+        check(selectionImage.getPixelAt(static_cast<int>((selectionA + selectionB) * 0.5f), wave->getHeight() - 22) == juce::Colour(0xff101315)
+              && p.getViewState().loop.start == 0.25, "pending selection has no bottom loop marker and does not move the active loop");
+        wave->applySelection();
+
+        check(!p.getViewState().midiKeyTracking, "original loop on every MIDI note is the DEFAULT");
+        p.stopLoop(); p.prepareToPlay(48000, 256);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0); p.processBlock(audio, midi);
+        const double rootCursor = p.getPlaybackSeconds(); const float rootAudio = audio.getSample(0, 128);
+        p.prepareToPlay(48000, 256); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1, 72, 1.0f), 0); p.processBlock(audio, midi);
+        check(p.getPlaybackSeconds() == rootCursor && audio.getSample(0, 128) == rootAudio, "C4 and C5 play identical original audio and speed when note tracking is OFF");
+        p.setMidiKeyTracking(true); p.prepareToPlay(48000, 256); p.processBlock(audio, midi);
+        check(std::abs(p.getPlaybackSeconds() - rootCursor * 2) < 0.000001, "optional MIDI pitch/speed tracking doubles speed one octave up");
+        p.setMidiKeyTracking(false); midi.clear(); p.prepareToPlay(48000, 256);
+
         p.setLoopSelection(0.25, 1.25, 2.0); p.saveSlot();
         host.ppq = 0.5; p.processBlock(audio, midi);
         const double expected = 0.25 + LoopMath::phase(0.5 + 255.0 * 120.0 / (60.0 * 48000.0), 2.0);
         check(std::abs(p.getPlaybackSeconds() - expected) < 0.000001, "playback cursor follows host PPQ at different sample rates");
         check(audio.getMagnitude(0, audio.getNumSamples()) > 0.01f, "loop produces audio");
+        midi.addEvent(juce::MidiMessage::noteOn(1, 72, 1.0f), 0); p.processBlock(audio, midi);
+        check(std::abs(p.getPlaybackSeconds() - expected) < 0.000001, "active loop stays original on a different MIDI note by default");
+        midi.clear();
         const float reference = audio.getSample(0, 128);
         host.ppq = 2.5; p.processBlock(audio, midi);
         check(std::abs(audio.getSample(0, 128) - reference) < 0.00001f, "host seek/loop repeat is phase consistent");
@@ -98,11 +151,11 @@ int main()
         running.store(false); audioThread.join();
         check(blocks.load() > 20 && elapsed < 15000, "live resize and waveform painting leave audio callbacks running");
         std::cout << "Resize stress: " << elapsed << " ms, " << blocks << " audio blocks\n";
-        p.setUiSettings(5, 3, false, true, true);
+        p.setUiSettings(5, 3, false, true, true); p.setMidiKeyTracking(true);
         juce::MemoryBlock saved; p.getStateInformation(saved);
         MiniSamplerAudioProcessor restored; restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize())); waitForLoad(restored);
         const auto restoredState = restored.getViewState();
-        check(restoredState.slots.size() == 1 && restoredState.grid == 5 && restoredState.zeroCross && restoredState.triplet && !restoredState.snap,
+        check(restoredState.slots.size() == 1 && restoredState.grid == 5 && restoredState.zeroCross && restoredState.triplet && !restoredState.snap && restoredState.midiKeyTracking,
               "DAW project state restores sample path, slots, grid, Snap and ZC");
         p.deleteSlot(0); check(p.getViewState().slots.empty(), "slot deletion");
         check(std::abs(LoopMath::phase(-0.5, 2) - 0.75) < 0.000001, "negative project PPQ wraps correctly");
