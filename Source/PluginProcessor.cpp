@@ -16,7 +16,7 @@ MiniSamplerAudioProcessor::~MiniSamplerAudioProcessor()
 void MiniSamplerAudioProcessor::prepareToPlay(double rate, int)
 {
     outputRate = juce::jmax(1.0, rate);
-    fallbackBeat = 0; voices = {}; lastAudioSample = nullptr;
+    fallbackBeat = 0; voices = {}; lastAudioSample = nullptr; loopMidiNote = 60;
 }
 
 bool MiniSamplerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout) const
@@ -33,7 +33,7 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     audioReaders.fetch_add(1, std::memory_order_seq_cst);
     const auto* sample = audioSample.load(std::memory_order_seq_cst);
     struct ReaderGuard { std::atomic<unsigned>& readers; ~ReaderGuard() { readers.fetch_sub(1, std::memory_order_seq_cst); } } guard { audioReaders };
-    if (sample != lastAudioSample) { voices = {}; lastAudioSample = sample; }
+    if (sample != lastAudioSample) { voices = {}; lastAudioSample = sample; loopMidiNote = 60; }
     bool connected = false, playing = false;
     double beat = fallbackBeat;
     if (auto* transport = getPlayHead())
@@ -68,26 +68,32 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     auto event = midi.cbegin();
     const auto eventEnd = midi.cend();
     double cursor = -1.0;
+    const bool keyTracking = midiKeyTracking.load();
+    double noteRatio = keyTracking ? std::pow(2.0, (loopMidiNote - 60) / 12.0) : 1.0;
     for (int i = 0; i < buffer.getNumSamples(); ++i)
     {
-        if (!looping)
             while (event != eventEnd && (*event).samplePosition <= i)
             {
                 const auto message = (*event).getMessage();
                 if (message.isNoteOn())
                 {
+                    loopMidiNote = message.getNoteNumber();
+                    noteRatio = keyTracking ? std::pow(2.0, (loopMidiNote - 60) / 12.0) : 1.0;
+                    if (!looping)
+                    {
                     auto* voice = &voices.front();
                     for (auto& v : voices) if (v.note < 0) { voice = &v; break; }
                     *voice = { 0.0, sample->rate / outputRate * std::pow(2.0, (message.getNoteNumber() - 60) / 12.0),
                                message.getFloatVelocity(), message.getNoteNumber() };
+                    }
                 }
                 if (message.isNoteOff()) for (auto& v : voices) if (v.note == message.getNoteNumber()) v.note = -1;
-                if (message.isAllNotesOff() || message.isAllSoundOff()) voices = {};
+                if (message.isAllNotesOff() || message.isAllSoundOff()) { voices = {}; loopMidiNote = 60; noteRatio = 1.0; }
                 ++event;
             }
         if (looping)
         {
-            const auto position = start + LoopMath::phase(beat + i * beatStep, audioLoop.beats) * (end - start);
+            const auto position = start + LoopMath::phase((beat + i * beatStep) * noteRatio, audioLoop.beats) * (end - start);
             const int index = juce::jlimit(0, sample->audio.getNumSamples() - 1, static_cast<int>(position));
             const int next = index + 1 < static_cast<int>(std::ceil(end)) ? juce::jmin(index + 1, sample->audio.getNumSamples() - 1)
                                                                        : juce::jlimit(0, sample->audio.getNumSamples() - 1, static_cast<int>(start));
@@ -113,7 +119,7 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
                         const auto* source = sample->audio.getReadPointer(juce::jmin(ch, sample->audio.getNumChannels() - 1));
                         buffer.addSample(ch, i, (source[index] + fraction * (source[index + 1] - source[index])) * voice.gain);
                     }
-                    cursor = voice.position / sample->rate; voice.position += voice.step;
+                    cursor = voice.position / sample->rate; voice.position += keyTracking ? voice.step : sample->rate / outputRate;
                 }
     }
     playbackSeconds.store(cursor, std::memory_order_relaxed);
@@ -236,6 +242,7 @@ void MiniSamplerAudioProcessor::getStateInformation(juce::MemoryBlock& block)
     xml.setAttribute("start", state.loop.start); xml.setAttribute("end", state.loop.end); xml.setAttribute("beats", state.loop.beats);
     xml.setAttribute("enabled", loopEnabled.load()); xml.setAttribute("grid", state.grid); xml.setAttribute("segments", state.segments);
     xml.setAttribute("snap", state.snap); xml.setAttribute("triplet", state.triplet); xml.setAttribute("zeroCross", state.zeroCross);
+    xml.setAttribute("midiKeyTracking", state.midiKeyTracking);
     xml.setAttribute("width", state.width); xml.setAttribute("height", state.height);
     for (const auto& slot : state.slots)
     {
@@ -257,6 +264,7 @@ void MiniSamplerAudioProcessor::setStateInformation(const void* data, int size)
             state.slots.push_back({ finite(child->getDoubleAttribute("start")), finite(child->getDoubleAttribute("end")), finite(child->getDoubleAttribute("beats")) });
     state.grid = juce::jlimit(1, 6, xml->getIntAttribute("grid", 3)); state.segments = juce::jlimit(1, 5, xml->getIntAttribute("segments", 1));
     state.snap = xml->getBoolAttribute("snap", true); state.triplet = xml->getBoolAttribute("triplet"); state.zeroCross = xml->getBoolAttribute("zeroCross");
+    state.midiKeyTracking = xml->getBoolAttribute("midiKeyTracking", false); midiKeyTracking.store(state.midiKeyTracking);
     state.width = juce::jlimit(720, 1800, xml->getIntAttribute("width", 1000)); state.height = juce::jlimit(260, 1100, xml->getIntAttribute("height", 390));
     publishLoop(state.loop); loopEnabled.store(xml->getBoolAttribute("enabled"));
     const juce::File file(xml->getStringAttribute("file"));
