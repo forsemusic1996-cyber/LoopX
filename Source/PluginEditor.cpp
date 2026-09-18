@@ -30,7 +30,7 @@ double MiniSamplerWaveformView::duration() const { return state.sample ? state.s
 double MiniSamplerWaveformView::visibleLength() const { return duration() / zoom; }
 juce::Rectangle<float> MiniSamplerWaveformView::waveArea() const
 {
-    return getLocalBounds().toFloat().withTrimmedTop(23.0f).withTrimmedBottom(49.0f).reduced(4.0f, 0.0f);
+    return getLocalBounds().toFloat().withTrimmedTop(20.0f).withTrimmedBottom(55.0f).reduced(4.0f, 0.0f);
 }
 float MiniSamplerWaveformView::xForTime(double time) const
 {
@@ -88,10 +88,17 @@ void MiniSamplerWaveformView::refresh()
 {
     auto next = processor.getViewState();
     const bool changed = next.sample != state.sample;
+    bool overlaysChanged = next.loop.start != state.loop.start || next.loop.end != state.loop.end
+        || next.grid != state.grid || next.segments != state.segments || next.snap != state.snap
+        || next.triplet != state.triplet || next.zeroCross != state.zeroCross || next.slots.size() != state.slots.size();
+    if (!overlaysChanged)
+        for (size_t i = 0; i < next.slots.size(); ++i)
+            if (next.slots[i].start != state.slots[i].start || next.slots[i].end != state.slots[i].end)
+            { overlaysChanged = true; break; }
     state = std::move(next);
     if (changed) { dirtyCache = true; viewStart = 0; zoom = 1; pendingSelection = false; dragMode = 0; }
     if (!pendingSelection && dragMode == 0) { selectionStart = state.loop.start; selectionEnd = state.loop.end; }
-    if (changed) repaint();
+    if (changed || overlaysChanged) repaint();
 }
 void MiniSamplerWaveformView::resized()
 {
@@ -102,26 +109,42 @@ void MiniSamplerWaveformView::rebuildWaveCache()
 {
     dirtyCache = false;
     if (!state.sample || getWidth() < 2 || getHeight() < 60) { waveCache = {}; return; }
-    const int width = juce::jmin(1800, getWidth());
-    const int height = juce::jmin(1000, static_cast<int>(waveArea().getHeight()));
+    const float density = juce::jlimit(1.0f, 3.0f, getDesktopScaleFactor() * juce::Component::getApproximateScaleFactorForComponent(this));
+    const int width = juce::jlimit(1, 5400, static_cast<int>(std::ceil(waveArea().getWidth() * density)));
+    const int height = juce::jlimit(1, 3000, static_cast<int>(std::ceil(waveArea().getHeight() * density)));
     waveCache = juce::Image(juce::Image::ARGB, width, juce::jmax(1, height), true);
     juce::Graphics g(waveCache);
     const int channels = stereo ? state.sample->audio.getNumChannels() : 1;
     for (int ch = 0; ch < channels; ++ch)
     {
-        const auto& peaks = state.sample->peaks[static_cast<size_t>(ch)];
-        const int total = static_cast<int>(peaks.size());
         const float band = static_cast<float>(height) / channels;
         const float centre = band * (ch + 0.5f);
         const float scale = band * 0.46f;
-        g.setColour(ch == 0 ? juce::Colour(0xff77b9c5) : juce::Colour(0xffb7a0df));
+        g.setColour(ch == 0 ? juce::Colour(0xff648b93) : juce::Colour(0xff93a9b3));
+        const double firstSample = viewStart * state.sample->rate;
+        const double samplesPerPixel = visibleLength() * state.sample->rate / width;
+        if (samplesPerPixel < 1.0)
+        {
+            juce::Path path;
+            const auto* data = state.sample->audio.getReadPointer(ch);
+            const int count = state.sample->audio.getNumSamples();
+            for (int x = 0; x < width; ++x)
+            {
+                const double position = juce::jlimit(0.0, static_cast<double>(count - 1), firstSample + x * samplesPerPixel);
+                const int a = static_cast<int>(position), b = juce::jmin(a + 1, count - 1);
+                const float value = data[a] + static_cast<float>(position - a) * (data[b] - data[a]);
+                if (x == 0) path.startNewSubPath(0, centre - value * scale);
+                else path.lineTo(static_cast<float>(x), centre - value * scale);
+            }
+            g.strokePath(path, juce::PathStrokeType(density));
+            continue;
+        }
         for (int x = 0; x < width; ++x)
         {
-            const int a = juce::jlimit(0, total - 1, static_cast<int>((viewStart + x * visibleLength() / width) / duration() * total));
-            const int b = juce::jlimit(a + 1, total, static_cast<int>((viewStart + (x + 1) * visibleLength() / width) / duration() * total) + 1);
-            float low = 0, high = 0;
-            for (int p = a; p < b; ++p) { low = juce::jmin(low, peaks[static_cast<size_t>(p)].first); high = juce::jmax(high, peaks[static_cast<size_t>(p)].second); }
-            g.drawVerticalLine(x, centre - high * scale, centre - low * scale + 0.5f);
+            const int a = static_cast<int>(firstSample + x * samplesPerPixel);
+            const int b = static_cast<int>(std::ceil(firstSample + (x + 1) * samplesPerPixel));
+            const auto range = state.sample->waveformRange(ch, a, b);
+            g.drawVerticalLine(x, centre - range.second * scale, centre - range.first * scale + density * 0.5f);
         }
     }
     repaint();
@@ -143,7 +166,7 @@ void MiniSamplerWaveformView::timerCallback()
 }
 void MiniSamplerWaveformView::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff17191c));
+    g.fillAll(juce::Colour(0xff101315));
     const auto area = waveArea();
     g.setColour(juce::Colour(0xff21252a)); g.fillRect(0, 0, getWidth(), 23);
     if (!state.sample)
@@ -153,7 +176,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         if (dragOver) { g.setColour(juce::Colour(0xff66ddc9)); g.drawRect(getLocalBounds(), 3); }
         return;
     }
-    g.setImageResamplingQuality(juce::Graphics::lowResamplingQuality);
+    g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
     if (waveCache.isValid()) g.drawImage(waveCache, area);
     const double beatSeconds = 60.0 / processor.getProjectTempo();
     const double barSeconds = beatSeconds * LoopMath::divisionBeats(1, processor.getProjectTimeSignatureNumerator(), processor.getProjectTimeSignatureDenominator());
@@ -166,8 +189,8 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         const float x = xForTime(t);
         if (x < area.getX() || x > area.getRight()) continue;
         const bool bar = std::abs(t / barSeconds - std::round(t / barSeconds)) < 0.00001;
-        g.setColour(bar ? juce::Colour(brightGrid ? 0xffdcc17e : 0xff75644a)
-                        : juce::Colour(brightGrid ? 0xff526b85 : 0xff323d49));
+        g.setColour(bar ? juce::Colour(brightGrid ? 0xff519b9d : 0xff375b5e)
+                        : juce::Colour(brightGrid ? 0xff343f42 : 0xff252d30));
         g.drawVerticalLine(static_cast<int>(x), area.getY(), area.getBottom());
         if (bar) { g.setFont(11.0f); g.drawText(juce::String(static_cast<int>(std::round(t / barSeconds)) + 1), static_cast<int>(x) + 3, 2, 48, 18, juce::Justification::centredLeft); }
     }
@@ -178,29 +201,43 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         const double drawStep = segment * segmentStride;
         for (double t = std::floor(viewStart / drawStep) * drawStep; t <= viewStart + visibleLength(); t += drawStep)
         {
-            g.setColour(juce::Colour(0xffe9a051));
+            g.setColour(juce::Colour(0xff56999c));
             g.drawLine(xForTime(t), area.getY(), xForTime(t), area.getBottom(), 1.5f);
         }
     }
-    const float startX = xForTime(selectionStart), endX = xForTime(selectionEnd);
-    if (selectionEnd > selectionStart)
+    const float startX = xForTime(state.loop.start), endX = xForTime(state.loop.end);
+    if (state.loop.end > state.loop.start)
     {
         const auto selection = juce::Rectangle<float>(startX, area.getY(), endX - startX, area.getHeight()).getIntersection(area);
-        g.setColour(juce::Colour(pendingSelection ? 0x5044aaff : 0x304ac6b1)); g.fillRect(selection);
-        g.setColour(juce::Colour(0xffe9a051));
-        g.drawLine(startX, area.getY(), startX, area.getBottom(), 2.0f); g.drawLine(endX, area.getY(), endX, area.getBottom(), 2.0f);
-        g.fillRect(startX, area.getY(), 9.0f, 8.0f); g.fillRect(endX - 9.0f, area.getY(), 9.0f, 8.0f);
-        const auto loopBar = juce::Rectangle<float>(startX, getHeight() - 29.0f, endX - startX, 12.0f).getIntersection(getLocalBounds().toFloat());
-        g.setColour(juce::Colour(0xff47788c)); g.fillRoundedRectangle(loopBar, 2.0f);
-        g.setColour(juce::Colour(0xffe9a051)); g.drawRoundedRectangle(loopBar, 2.0f, 1.0f);
+        g.setColour(juce::Colour(0x354cb8b7)); g.fillRect(selection);
+        g.setColour(juce::Colour(0xff66cecd));
+        for (const float x : { startX, endX })
+            if (x >= area.getX() && x <= area.getRight()) g.drawLine(x, area.getY(), x, area.getBottom(), 1.0f);
+        juce::Path flags;
+        if (startX >= area.getX() && startX <= area.getRight()) flags.addTriangle(startX, area.getY(), startX + 10, area.getY(), startX, area.getY() + 10);
+        if (endX >= area.getX() && endX <= area.getRight()) flags.addTriangle(endX, area.getY(), endX - 10, area.getY(), endX, area.getY() + 10);
+        g.fillPath(flags);
+        const auto loopBar = juce::Rectangle<float>(startX, getHeight() - 27.0f, endX - startX, 10.0f).getIntersection(getLocalBounds().toFloat());
+        g.setColour(juce::Colour(0xff426f74)); g.fillRoundedRectangle(loopBar, 2.0f);
+        g.setColour(juce::Colour(0xff66cecd)); g.drawRoundedRectangle(loopBar, 2.0f, 1.0f);
+    }
+    if (pendingSelection && selectionEnd != selectionStart)
+    {
+        const float a = xForTime(juce::jmin(selectionStart, selectionEnd)), b = xForTime(juce::jmax(selectionStart, selectionEnd));
+        g.setColour(juce::Colour(0x60699fef));
+        g.fillRect(juce::Rectangle<float>(a, area.getY(), b - a, area.getHeight()).getIntersection(area));
     }
     for (size_t i = 0; i < state.slots.size(); ++i)
     {
         const auto& slot = state.slots[i];
         const float a = xForTime(slot.start), b = xForTime(slot.end);
-        g.setColour(juce::Colour(0x60ddbf62)); g.fillRect(a, getHeight() - 46.0f, b - a, 14.0f);
-        g.setColour(juce::Colour(0xffe0c777)); g.setFont(11.0f);
-        g.drawText(juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), static_cast<int>(a) + 3, getHeight() - 47, 18, 15, juce::Justification::centredLeft);
+        const auto line = juce::Rectangle<float>(a, getHeight() - 35.0f, b - a, 3.0f).getIntersection(getLocalBounds().toFloat());
+        g.setColour(juce::Colour(0xffcfbb80)); g.fillRect(line);
+        if (line.getWidth() > 0)
+        {
+            g.setColour(juce::Colour(0xfff0dfa8)); g.setFont(16.0f);
+            g.drawText(juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), static_cast<int>(line.getX()) + 2, getHeight() - 54, 24, 18, juce::Justification::centredLeft);
+        }
     }
     if (cursor >= viewStart && cursor <= viewStart + visibleLength())
     {
@@ -258,7 +295,7 @@ void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
     {
         juce::PopupMenu menu; menu.addItem(1, "SET selection as loop", selectionEnd > selectionStart); menu.addItem(2, "Save loop to slot", state.loop.end > state.loop.start && state.slots.size() < 10);
         juce::Component::SafePointer<MiniSamplerWaveformView> safe(this);
-        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this), [safe](int result)
+        menu.showMenuAsync(miniSamplerMenuOptions(*getParentComponent(), event.getScreenPosition()), [safe](int result)
         { if (safe) { if (result == 1) safe->applySelection(); if (result == 2) { safe->processor.saveSlot(); if (safe->onChanged) safe->onChanged(); safe->refresh(); safe->repaint(); } } });
         return;
     }
@@ -343,7 +380,12 @@ void MiniSamplerWaveformView::mouseWheelMove(const juce::MouseEvent& event, cons
     const double anchor = timeForX(static_cast<float>(event.x));
     const double fraction = juce::jlimit(0.0, 1.0, static_cast<double>((event.x - waveArea().getX()) / juce::jmax(1.0f, waveArea().getWidth())));
     if (event.mods.isShiftDown()) viewStart += wheel.deltaY * visibleLength() * 0.4;
-    else { zoom = juce::jlimit(1.0, 128.0, zoom * (wheel.deltaY > 0 ? 1.25 : 0.8)); viewStart = anchor - fraction * visibleLength(); }
+    else
+    {
+        const double maximumZoom = juce::jmax(128.0, duration() * state.sample->rate / juce::jmax(1.0f, waveArea().getWidth()) * 8.0);
+        zoom = juce::jlimit(1.0, maximumZoom, zoom * (wheel.deltaY > 0 ? 1.25 : 0.8));
+        viewStart = anchor - fraction * visibleLength();
+    }
     viewStart = juce::jlimit(0.0, juce::jmax(0.0, duration() - visibleLength()), viewStart); dirtyCache = true; repaint();
 }
 void MiniSamplerWaveformView::resetZoom() { zoom = 1.0; viewStart = 0.0; dirtyCache = true; repaint(); }
@@ -353,7 +395,7 @@ MiniSamplerAudioProcessorEditor::MiniSamplerAudioProcessorEditor(MiniSamplerAudi
     state = processor.getViewState();
     setOpaque(true); setWantsKeyboardFocus(true); setResizable(true, true); setResizeLimits(800, 260, 1800, 1100);
     addAndMakeVisible(waveform);
-    waveform.onChanged = [this] { state = processor.getViewState(); layoutTools(); repaint(0, 0, getWidth(), 38); };
+    waveform.onChanged = [this] { state = processor.getViewState(); layoutTools(); repaint(); };
     setSize(juce::jmax(800, state.width), state.height); startTimerHz(15);
 }
 MiniSamplerAudioProcessorEditor::~MiniSamplerAudioProcessorEditor() { stopTimer(); }
@@ -361,7 +403,7 @@ void MiniSamplerAudioProcessorEditor::layoutTools()
 {
     tools.clear();
     const auto put = [this](int id, juce::String text, int x, int width, bool active = false)
-    { tools.push_back({ id, std::move(text), { x, 7, width, 24 }, active }); };
+    { tools.push_back({ id, std::move(text), { x, 5, width, 18 }, active }); };
     put(load, "Load", 6, 45); put(set, "SET", 55, 34);
     int x = 94;
     for (size_t i = 0; i < state.slots.size(); ++i) { put(100 + static_cast<int>(i), juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), x, 16, true); x += 19; }
@@ -378,19 +420,21 @@ void MiniSamplerAudioProcessorEditor::layoutTools()
 }
 void MiniSamplerAudioProcessorEditor::resized()
 {
-    waveform.setBounds(4, 39, getWidth() - 8, juce::jmax(10, getHeight() - 65));
+    waveform.setBounds(4, 28, getWidth() - 8, juce::jmax(10, getHeight() - 54));
     layoutTools(); processor.setEditorSize(getWidth(), getHeight());
 }
 void MiniSamplerAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff111317)); g.setFont(11.0f);
+    g.fillAll(juce::Colour(0xff202426)); g.setFont(12.0f);
     for (const auto& tool : tools)
     {
-        g.setColour(tool.active ? juce::Colour(0xff274558) : juce::Colour(0xff292e35)); g.fillRoundedRectangle(tool.rect.toFloat(), 3.0f);
-        g.setColour(tool.active ? juce::Colour(0xff7ac3de) : juce::Colour(0xff657080)); g.drawRoundedRectangle(tool.rect.toFloat(), 3.0f, 1.0f);
+        g.setFont(tool.id >= 100 ? 15.0f : 12.0f);
+        g.setColour(tool.active ? juce::Colour(0xff23474a) : juce::Colour(0xff292e30)); g.fillRoundedRectangle(tool.rect.toFloat(), 2.0f);
+        g.setColour(tool.active ? juce::Colour(0xff66cecd) : juce::Colour(0xff657577)); g.drawRoundedRectangle(tool.rect.toFloat(), 2.0f, 1.0f);
         g.setColour(juce::Colour(0xffe1e7ed)); g.drawText(tool.text, tool.rect, juce::Justification::centred);
     }
     g.setColour(juce::Colour(0xffa8b4c2));
+    g.setFont(11.0f);
     const int bottom = getHeight() - 23;
     g.drawText("Mini Sampler / LoopX v0.2  |  " + state.status, 10, bottom, getWidth() - 260, 19, juce::Justification::centredLeft);
     const auto tempo = processor.getProjectTempo();
@@ -418,6 +462,7 @@ void MiniSamplerAudioProcessorEditor::chooseFile()
 }
 void MiniSamplerAudioProcessorEditor::mouseDown(const juce::MouseEvent& event)
 {
+    menuPosition = event.getScreenPosition();
     for (const auto& tool : tools) if (tool.rect.contains(event.getPosition())) { invoke(tool.id, event.mods.isRightButtonDown()); break; }
 }
 void MiniSamplerAudioProcessorEditor::invoke(int id, bool rightClick)
@@ -433,7 +478,7 @@ void MiniSamplerAudioProcessorEditor::invoke(int id, bool rightClick)
         processor.setUiSettings(state.grid, state.segments, id == snap ? !state.snap : state.snap, state.triplet, id == zc ? !state.zeroCross : state.zeroCross);
     else if (id == play) { if (processor.isLooping()) processor.stopLoop(); else waveform.applySelection(); }
     else menuFor(id);
-    state = processor.getViewState(); layoutTools(); waveform.repaint(); repaint();
+    state = processor.getViewState(); layoutTools(); waveform.refreshFromProcessor(); repaint();
 }
 void MiniSamplerAudioProcessorEditor::menuFor(int id)
 {
@@ -455,7 +500,7 @@ void MiniSamplerAudioProcessorEditor::menuFor(int id)
         menu.addItem(5, "Help: mouse and keyboard");
     }
     juce::Component::SafePointer<MiniSamplerAudioProcessorEditor> safe(this);
-    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
+    menu.showMenuAsync(miniSamplerMenuOptions(*this, menuPosition), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
 }
 void MiniSamplerAudioProcessorEditor::handleMenu(int id, int result)
 {
@@ -472,7 +517,7 @@ void MiniSamplerAudioProcessorEditor::handleMenu(int id, int result)
         if (result == 5) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "Mini Sampler / LoopX",
             "Drag a local audio file onto the waveform.\nDrag to select; SET or right-click applies the loop.\nDrag orange markers to resize; drag the bottom loop bar to move.\nSegments: click a whole segment. + saves a slot (up to 10).\nLeft-click slot recalls; right-click deletes. Keys 1-9/0 recall.\nLeft/Right nudge by grid; Up/Down move one loop length.\nMouse wheel zooms; Shift+wheel or middle-drag pans.\nSnap has priority over ZC (nearest crossing within 5 ms).\nLoop follows DAW Play/Stop/seek and BPM; tempo changes use varispeed.\nSamples are linked by file path, not embedded in the project.");
     }
-    state = processor.getViewState(); layoutTools(); waveform.repaint(); repaint();
+    state = processor.getViewState(); layoutTools(); waveform.refreshFromProcessor(); repaint();
 }
 bool MiniSamplerAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 {
