@@ -632,8 +632,10 @@ void MiniSamplerAudioProcessor::setStateInformation(const void* data, int size)
     projectTempo.store(state.targetBpm);
     state.width = juce::jlimit(900, 1800, xml->getIntAttribute("width", 1000)); state.height = juce::jlimit(260, 1100, xml->getIntAttribute("height", 390));
     const int savedSlot = juce::jlimit(0,10,xml->getIntAttribute("slot",0));
-    slotParameter->setValue(slotParameter->convertTo0to1(savedSlot)); liveSlot.store(savedSlot);
-    positionParameter->setValue(positionParameter->convertTo0to1(float(juce::jlimit(0.0, 1.0, sane(xml->getDoubleAttribute("loopPosition"))))));
+    // AudioParameterInt/Float make their overrides private; the normalized
+    // setter is public on the base parameter. Restore without host callbacks.
+    static_cast<juce::AudioProcessorParameter*>(slotParameter)->setValue(slotParameter->convertTo0to1(savedSlot)); liveSlot.store(savedSlot);
+    static_cast<juce::AudioProcessorParameter*>(positionParameter)->setValue(positionParameter->convertTo0to1(float(juce::jlimit(0.0, 1.0, sane(xml->getDoubleAttribute("loopPosition"))))));
     livePosition.store(xml->getDoubleAttribute("positionOverride", -1));
     loopEnabled.store(xml->getBoolAttribute("enabled")); restoredCoordinates = true;
     publishLoop(state.loop);
