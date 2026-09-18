@@ -37,7 +37,8 @@ int main()
         juce::WavAudioFormat format;
         std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(file.createOutputStream().release(), 44100, 2, 16, {}, 0));
         check(writer != nullptr && writer->writeFromAudioSampleBuffer(source, 0, source.getNumSamples()), "test WAV creation"); writer.reset();
-        MiniSamplerAudioProcessor p; Transport host;
+        MiniSamplerAudioProcessor p; check(!p.getViewState().brightGrid, "Bright Grid is OFF by default");
+        Transport host;
         p.setPlayHead(&host); p.prepareToPlay(48000, 256);
         juce::AudioBuffer<float> audio(2, 256); juce::MidiBuffer midi; p.processBlock(audio, midi);
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
@@ -81,23 +82,23 @@ int main()
         const auto slotBaseline = wave->createComponentSnapshot(wave->getLocalBounds());
         check(wave->getBottom() == editor->getHeight() - 4, "waveform fills editor down to bottom margin with no footer");
         check(slotBaseline.getPixelAt(10, 5) == juce::Colour(0xff484a4c)
-              && slotBaseline.getPixelAt(10, 21) == juce::Colour(0xff484a4c), "muted gray scrollbar fills full top strip");
+              && slotBaseline.getPixelAt(10, 11) == juce::Colour(0xff484a4c), "muted gray scrollbar has the compact 14-pixel height");
         bool labelOnWaveform = false;
         const int labelX = 4 + static_cast<int>((wave->getWidth() - 8) * 0.75);
-        for (int y = 26; y < 40; ++y)
+        for (int y = 16; y < 30; ++y)
             for (int x = labelX + 3; x < labelX + 30; ++x)
                 if (slotBaseline.getPixelAt(x, y).getRed() > 110) labelOnWaveform = true;
         check(labelOnWaveform, "bar and beat numbers are drawn below scrollbar on waveform");
         editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::leftButtonModifier));
         auto slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
         const int slotX = 4 + static_cast<int>((wave->getWidth() - 8) * 0.35);
-        check(slotImage.getPixelAt(slotX, wave->getHeight() - 19) == juce::Colour(0xffe07a5f), "coral slot line overlays waveform immediately without playback or timer");
-        check(slotImage.getPixelAt(slotX, wave->getHeight() - 16) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 16), "slot marker is only three pixels thick and does not occupy loop bar");
-        check(slotImage.getPixelAt(slotX, wave->getHeight() - 15) != juce::Colour(0xff101315)
-              && slotImage.getPixelAt(slotX, wave->getHeight() - 6) != juce::Colour(0xff101315), "bottom loop handle is twelve pixels high");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 21) == juce::Colour(0xffe07a5f), "coral slot line overlays waveform immediately without playback or timer");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 18) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 18), "slot marker is only three pixels thick and does not occupy loop bar");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 17) != juce::Colour(0xff101315)
+              && slotImage.getPixelAt(slotX, wave->getHeight() - 6) != juce::Colour(0xff101315), "bottom loop handle is fourteen pixels high");
         editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::rightButtonModifier));
         slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
-        check(p.getViewState().slots.empty() && slotImage.getPixelAt(slotX, wave->getHeight() - 19) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 19),
+        check(p.getViewState().slots.empty() && slotImage.getPixelAt(slotX, wave->getHeight() - 21) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 21),
               "deleting slot removes its line immediately without playback");
         p.setLoopSelection(0.25, 0.5, 0.5); wave->refreshFromProcessor();
         const float selectionA = 4.0f + (wave->getWidth() - 8) * 0.5f;
@@ -134,7 +135,7 @@ int main()
         juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
         const auto cursorImage = wave->createComponentSnapshot(wave->getLocalBounds());
         bool cursorInScrollbar = false;
-        for (int y = 0; y < 24; ++y)
+        for (int y = 0; y < 14; ++y)
             for (int x = 0; x < wave->getWidth(); ++x)
                 if (cursorImage.getPixelAt(x, y).getGreen() > 140) cursorInScrollbar = true;
         check(!cursorInScrollbar, "turquoise playback cursor and labels never enter scrollbar");
@@ -187,6 +188,12 @@ int main()
               && restoredState.triplet && !restoredState.snap && restoredState.midiKeyTracking && !restoredState.brightGrid && restoredState.stereoWaveform,
               "DAW project state restores sample path, slots, grid, Snap and ZC");
         p.deleteSlot(0); check(p.getViewState().slots.empty(), "slot deletion");
+        p.setLoopSelection(0.25, 1.25, 2.0); p.saveSlot();
+        p.requestSampleLoad(file); waitForLoad(p);
+        const auto replacementState = p.getViewState();
+        check(replacementState.slots.size() == 1 && std::abs(replacementState.loop.start - 0.25) < 0.000001
+              && std::abs(replacementState.loop.end - 1.25) < 0.000001,
+              "replacing a sample retains a valid loop and saved slots");
         check(std::abs(LoopMath::phase(-0.5, 2) - 0.75) < 0.000001, "negative project PPQ wraps correctly");
         check(LoopMath::divisionBeats(1, 7, 8) == 3.5, "bar division respects time signature");
         editor.reset(); p.setPlayHead(nullptr); file.deleteFile();
