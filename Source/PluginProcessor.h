@@ -3,6 +3,7 @@
 #include <atomic>
 #include <array>
 #include "LoopMath.h"
+#include "LoopPlayback.h"
 
 struct MiniSamplerSample
 {
@@ -73,15 +74,19 @@ struct MiniSamplerSample
 class MiniSamplerAudioProcessor final : public juce::AudioProcessor, private juce::Thread
 {
 public:
-    struct Loop { double start = 0.0, end = 0.0, beats = 0.0; };
+    struct Loop { double start = 0.0, end = 0.0, beats = 0.0, fadeIn = 0.004, fadeOut = 0.004; };
     struct ViewState
     {
         std::shared_ptr<const MiniSamplerSample> sample;
+        std::shared_ptr<const MiniSamplerSample> originalSample;
         Loop loop;
         std::vector<Loop> slots;
         int grid = 3, segments = 1;
         bool snap = true, triplet = false, zeroCross = false, midiKeyTracking = false;
         bool brightGrid = false, stereoWaveform = false;
+        int playbackMode = 0, theme = 0, velocityMode = 0;
+        double startOffset = 0, playbackOffset = 0, originalBpm = 120, targetBpm = 120;
+        bool stretchApplied = false;
         int width = 1000, height = 390;
         juce::String status;
     };
@@ -116,6 +121,16 @@ public:
     void deleteSlot(int);
     void setUiSettings(int grid, int segments, bool snap, bool triplet, bool zeroCross);
     void setDisplaySettings(bool brightGrid, bool stereoWaveform);
+    void setPlaybackSettings(int mode, int velocityMode);
+    void setTheme(int);
+    void setLoopFades(double fadeIn, double fadeOut);
+    void setStartOffset(double);
+    bool matchBpm(double original);
+    void selectSlot(int);
+    static int velocitySlot(int velocity) { return juce::jlimit(1, 10, ((velocity - 1) * 10) / 127 + 1); }
+    double getTimelineTempo() const { const auto tempo = timelineTempo.load(); return tempo > 0 ? tempo : getProjectTempo(); }
+    juce::AudioParameterInt* slotParameter = nullptr;
+    juce::AudioParameterFloat* positionParameter = nullptr;
     void setEditorSize(int, int);
     double getProjectTempo() const { return projectTempo.load(); }
     int getProjectTimeSignatureNumerator() const { return numerator.load(); }
@@ -127,12 +142,24 @@ public:
     {
         const juce::ScopedLock lock(stateLock);
         state.midiKeyTracking = enabled; midiKeyTracking.store(enabled);
+        updateHostDisplay(ChangeDetails{}.withNonParameterStateChanged(true));
     }
 private:
     void run() override;
     void publishLoop(const Loop&);
-    struct Voice { double position = 0, step = 1; float gain = 0; int note = -1; };
-    std::array<Voice, 16> voices {};
+    struct AtomicLoop { std::atomic<double> start{0}, end{0}, beats{0}, fadeIn{0.004}, fadeOut{0.004}; };
+    std::array<AtomicLoop, 11> regions;
+    std::array<Loop, 11> rtRegions {};
+    std::atomic<int> regionCount{0}, liveSlot{0}, playbackMode{0}, velocityMode{0}, liveGrid{3};
+    std::atomic<bool> liveSnap{true}, liveTriplet{false};
+    std::atomic<double> sourceOffset{0}, timelineTempo{0};
+    std::atomic<double> livePosition{-1};
+    LoopPlayback engine;
+    std::array<uint64_t, 2048> heldNotes {};
+    uint64_t noteOrder = 0;
+    double midiPhase = 0, gateGain = 0, expectedBeat = 0;
+    int selectedSlot = 0, lastParameterSlot = -1, lastMode = -1;
+    float lastPositionParameter = 0;
     double outputRate = 44100.0, fallbackBeat = 0.0;
     int loopMidiNote = 60;
     Loop audioLoop;
@@ -146,12 +173,14 @@ private:
     juce::File pendingFile;
     bool pendingRestore = false;
     uint64_t requestVersion = 0;
+    uint64_t transformVersion = 0;
+    bool transformPending = false, restoredCoordinates = false;
+    double appliedOffset = 0, appliedRatio = 1, appliedTempo = 0;
     std::atomic<bool> loading { false };
     std::atomic<bool> midiKeyTracking { false };
     std::atomic<double> projectTempo { 120.0 }, playbackSeconds { -1.0 };
     std::atomic<int> numerator { 4 }, denominator { 4 };
     std::atomic<bool> hostPlaying { false }, hostConnected { false }, loopEnabled { false };
     std::atomic<unsigned> loopSequence { 0 };
-    std::atomic<double> loopStart { 0.0 }, loopEnd { 0.0 }, loopBeats { 0.0 };
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerAudioProcessor)
 };
