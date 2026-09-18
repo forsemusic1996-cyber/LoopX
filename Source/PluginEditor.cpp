@@ -30,7 +30,7 @@ double MiniSamplerWaveformView::duration() const { return state.sample ? state.s
 double MiniSamplerWaveformView::visibleLength() const { return duration() / zoom; }
 juce::Rectangle<float> MiniSamplerWaveformView::waveArea() const
 {
-    return getLocalBounds().toFloat().withTrimmedTop(24.0f).withTrimmedBottom(16.0f).reduced(4.0f, 0.0f);
+    return getLocalBounds().toFloat().withTrimmedTop(14.0f).withTrimmedBottom(18.0f).reduced(4.0f, 0.0f);
 }
 float MiniSamplerWaveformView::xForTime(double time) const
 {
@@ -171,7 +171,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff101315));
     const auto area = waveArea();
-    g.setColour(juce::Colour(0xff303234)); g.fillRect(0, 0, getWidth(), 24);
+    g.setColour(juce::Colour(0xff303234)); g.fillRect(0, 0, getWidth(), 14);
     if (!state.sample)
     {
         g.setColour(juce::Colour(0xffa6b1bc)); g.setFont(14.0f);
@@ -219,7 +219,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         if (startX >= area.getX() && startX <= area.getRight()) flags.addTriangle(startX, area.getY(), startX + 10, area.getY(), startX, area.getY() + 10);
         if (endX >= area.getX() && endX <= area.getRight()) flags.addTriangle(endX, area.getY(), endX - 10, area.getY(), endX, area.getY() + 10);
         g.fillPath(flags);
-        const auto loopBar = juce::Rectangle<float>(startX, area.getBottom(), endX - startX, 12.0f).getIntersection(getLocalBounds().toFloat());
+        const auto loopBar = juce::Rectangle<float>(startX, area.getBottom(), endX - startX, 14.0f).getIntersection(getLocalBounds().toFloat());
         g.setColour(juce::Colour(0xff426f74)); g.fillRoundedRectangle(loopBar, 2.0f);
         g.setColour(juce::Colour(0xff66cecd)); g.drawRoundedRectangle(loopBar, 2.0f, 1.0f);
     }
@@ -425,7 +425,7 @@ void MiniSamplerAudioProcessorEditor::layoutTools()
     { tools.push_back({ id, std::move(text), { x, 5, width, 18 }, active }); };
     put(load, "Load", 6, 45); put(set, "SET", 55, 34);
     int x = 94;
-    for (size_t i = 0; i < state.slots.size(); ++i) { put(100 + static_cast<int>(i), juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), x, 16, true); x += 19; }
+    for (size_t i = 0; i < state.slots.size(); ++i) { put(100 + static_cast<int>(i), juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), x, 22, true); x += 25; }
     put(add, "+", x, 22, state.slots.size() < 10);
     const int centre = getWidth() / 2 - 93;
     put(length, "LOOP LENGTH", centre, 112, true); put(twice, juce::String::charToString(0x00d7) + "2", centre + 116, 31); put(half, juce::String::charToString(0x00f7) + "2", centre + 151, 31);
