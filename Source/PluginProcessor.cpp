@@ -150,21 +150,7 @@ void MiniSamplerAudioProcessor::run()
                     sample = std::make_shared<MiniSamplerSample>(); sample->rate = reader->sampleRate; sample->file = file;
                     sample->audio.setSize(juce::jmin(2, static_cast<int>(reader->numChannels)), static_cast<int>(reader->lengthInSamples));
                     if (!reader->read(&sample->audio, 0, sample->audio.getNumSamples(), 0, true, true)) sample.reset();
-                    if (sample)
-                        for (int ch = 0; ch < sample->audio.getNumChannels(); ++ch)
-                        {
-                            const int count = juce::jmin(8192, sample->audio.getNumSamples());
-                            auto& peaks = sample->peaks[static_cast<size_t>(ch)]; peaks.resize(static_cast<size_t>(count));
-                            const auto* source = sample->audio.getReadPointer(ch);
-                            for (int p = 0; p < count && !threadShouldExit(); ++p)
-                            {
-                                const int a = static_cast<int>(static_cast<int64_t>(p) * sample->audio.getNumSamples() / count);
-                                const int b = static_cast<int>(static_cast<int64_t>(p + 1) * sample->audio.getNumSamples() / count);
-                                float low = 0, high = 0;
-                                for (int i = a; i < b; ++i) { low = juce::jmin(low, source[i]); high = juce::jmax(high, source[i]); }
-                                peaks[static_cast<size_t>(p)] = { low, high };
-                            }
-                        }
+                    if (sample) sample->buildWaveform();
                 }
             }
             catch (const std::exception&) { sample.reset(); error = "Not enough memory to load " + file.getFileName(); }
