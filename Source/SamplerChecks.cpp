@@ -186,7 +186,9 @@ int main()
             check(MiniSamplerAudioProcessor::velocitySlot(lows[slot]) == slot + 1 &&
                   MiniSamplerAudioProcessor::velocitySlot(highs[slot]) == slot + 1, "velocity maps to exact specified slot boundaries");
         p.setLoopSelection(0.2, 0.7, 1); p.recallSlot(0); const auto stored = p.getViewState().loop;
-        p.slotParameter->setValueNotifyingHost(p.slotParameter->convertTo0to1(0)); p.processBlock(audio, midi);
+        p.slotParameter->setValueNotifyingHost(p.slotParameter->convertTo0to1(0));
+        midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,60,1.0f),0); p.processBlock(audio, midi);
+        check(p.getPlaybackSeconds() >= 0.2 && p.getPlaybackSeconds() < 0.21, "host Slot automation wins over an older UI slot request in actual audio");
         check(std::abs(p.getViewState().loop.start - 0.2) < 1e-8, "Slot automation zero selects manual loop");
         p.slotParameter->setValueNotifyingHost(p.slotParameter->convertTo0to1(1)); p.processBlock(audio, midi);
         check(p.getViewState().loop.start == stored.start, "Slot automation one selects first stored loop");
