@@ -7,14 +7,33 @@
 namespace {
 double sane(double v, double fallback = 0) { return std::isfinite(v) && v >= 0 ? v : fallback; }
 bool validBpm(double v) { return std::isfinite(v) && v >= 20 && v <= 400; }
+// valueChanged runs for EVERY host write, including writing zero again after
+// manual edits or velocity selection. Callbacks do only lock-free atomic work.
+class SlotControl final : public juce::AudioParameterInt
+{
+public:
+    SlotControl(std::atomic<unsigned>& v, std::atomic<double>& p)
+        : AudioParameterInt(juce::ParameterID{"slot",1}, "Slot", 0,10,0), version(v), position(p) {}
+private:
+    void valueChanged(int) override { position.store(-1); ++version; }
+    std::atomic<unsigned>& version; std::atomic<double>& position;
+};
+class PositionControl final : public juce::AudioParameterFloat
+{
+public:
+    explicit PositionControl(std::atomic<double>& p)
+        : AudioParameterFloat(juce::ParameterID{"loopPosition",1}, "Loop Position", juce::NormalisableRange<float>{0,1},0), position(p) {}
+private:
+    void valueChanged(float value) override { position.store(value); }
+    std::atomic<double>& position;
+};
 }
 MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       Thread("MiniSampler loader")
 {
-    addParameter(slotParameter = new juce::AudioParameterInt(juce::ParameterID{"slot", 1}, "Slot", 0, 10, 0));
-    addParameter(positionParameter = new juce::AudioParameterFloat(juce::ParameterID{"loopPosition", 1},
-        "Loop Position", juce::NormalisableRange<float>{0, 1}, 0));
+    addParameter(slotParameter = new SlotControl(slotSelectionVersion, livePosition));
+    addParameter(positionParameter = new PositionControl(livePosition));
     state.status = "Drop audio here"; startThread();
 }
 MiniSamplerAudioProcessor::~MiniSamplerAudioProcessor() { signalThreadShouldExit(); notify(); stopThread(-1); }
@@ -24,7 +43,7 @@ void MiniSamplerAudioProcessor::prepareToPlay(double rate, int)
     heldNotes = {}; noteOrder = 0; loopMidiNote = 60; midiPhase = 0; gateGain = 0;
     lastAudioSample = nullptr; lastParameterSlot = slotParameter->get(); selectedSlot = lastParameterSlot; lastMode = -1;
     lastSelectionVersion = slotSelectionVersion.load(); lastVelocity = velocityMode.load();
-    lastPositionParameter = positionParameter->get(); engine.prepare(outputRate);
+    engine.prepare(outputRate);
     outputTail = {}; switchTail = {}; switchFade = 0; previousValid = false;
 }
 bool MiniSamplerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout) const
@@ -74,11 +93,12 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     if (velocity != lastVelocity) { selectedSlot = parameterSlot; lastVelocity = velocity; midiPhase = 0; }
     const auto selectionVersion = slotSelectionVersion.load();
     if (selectionVersion != lastSelectionVersion)
-    { selectedSlot = parameterSlot; lastSelectionVersion = selectionVersion; midiPhase = 0; }
+    {
+        if (selectedSlot != parameterSlot) { selectedSlot = parameterSlot; midiPhase = 0; }
+        lastSelectionVersion = selectionVersion;
+    }
     if (parameterSlot != lastParameterSlot)
-    { selectedSlot = parameterSlot; lastParameterSlot = parameterSlot; livePosition.store(-1); midiPhase = 0; }
-    const float position = positionParameter->get();
-    if (position != lastPositionParameter) { livePosition.store(position); lastPositionParameter = position; }
+    { selectedSlot = parameterSlot; lastParameterSlot = parameterSlot; midiPhase = 0; }
     const bool seek = std::abs(beat - expectedBeat) > juce::jmax(0.0001, beatStep * 2);
     expectedBeat = beat + buffer.getNumSamples() * beatStep;
     auto event = midi.cbegin(); const auto eventEnd = midi.cend();
@@ -332,7 +352,7 @@ void MiniSamplerAudioProcessor::stopLoop() { loopEnabled.store(false); }
 void MiniSamplerAudioProcessor::selectSlot(int slot)
 {
     slotParameter->beginChangeGesture(); slotParameter->setValueNotifyingHost(slotParameter->convertTo0to1(juce::jlimit(0, 10, slot))); slotParameter->endChangeGesture();
-    liveSlot.store(slot); livePosition.store(-1); requestedSlot.store(slot); ++slotSelectionVersion;
+    liveSlot.store(slot); livePosition.store(-1);
 }
 void MiniSamplerAudioProcessor::saveSlot()
 {
