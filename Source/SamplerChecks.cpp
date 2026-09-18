@@ -1,8 +1,11 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "StretchRender.h"
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+#include <limits>
+
 namespace
 {
 void check(bool passed, const char* message)
@@ -17,7 +20,8 @@ void waitForLoad(MiniSamplerAudioProcessor& p)
 }
 struct Transport final : juce::AudioPlayHead
 {
-    double bpm = 120, ppq = 0; bool playing = true;
+    double bpm = 120, ppq = 0;
+    bool playing = true;
     juce::Optional<PositionInfo> getPosition() const override
     {
         PositionInfo p; p.setBpm(bpm); p.setPpqPosition(ppq); p.setIsPlaying(playing);
@@ -25,6 +29,7 @@ struct Transport final : juce::AudioPlayHead
     }
 };
 }
+
 int main()
 {
     juce::ScopedJuceInitialiser_GUI init;
@@ -33,14 +38,16 @@ int main()
     {
         juce::AudioBuffer<float> source(2, 88200);
         for (int i = 0; i < source.getNumSamples(); ++i)
-            for (int ch = 0; ch < 2; ++ch) source.setSample(ch, i, static_cast<float>(std::sin(i * 0.017 + ch * 0.7) * 0.3));
+            for (int ch = 0; ch < 2; ++ch) source.setSample(ch, i, static_cast<float>(std::sin(i * juce::MathConstants<double>::twoPi * 440 / 44100) * (ch == 0 ? 0.3 : 0.15)));
         juce::WavAudioFormat format;
         std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(file.createOutputStream().release(), 44100, 2, 16, {}, 0));
         check(writer != nullptr && writer->writeFromAudioSampleBuffer(source, 0, source.getNumSamples()), "test WAV creation"); writer.reset();
-        MiniSamplerAudioProcessor p; check(!p.getViewState().brightGrid, "Bright Grid is OFF by default");
-        Transport host;
-        p.setPlayHead(&host); p.prepareToPlay(48000, 256);
-        juce::AudioBuffer<float> audio(2, 256); juce::MidiBuffer midi; p.processBlock(audio, midi);
+
+        MiniSamplerAudioProcessor p;
+        check(!p.getViewState().brightGrid, "Bright Grid is OFF by default");
+        Transport host; p.setPlayHead(&host); p.prepareToPlay(48000, 256);
+        juce::AudioBuffer<float> audio(2, 256); juce::MidiBuffer midi;
+        p.processBlock(audio, midi);
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
         auto* drop = dynamic_cast<juce::FileDragAndDropTarget*>(editor.get());
         MiniSamplerWaveformView* wave = nullptr;
@@ -118,7 +125,7 @@ int main()
         wave->applySelection();
 
         check(!p.getViewState().midiKeyTracking, "original loop on every MIDI note is the DEFAULT");
-        p.stopLoop(); p.prepareToPlay(48000, 256);
+        p.setLoopSelection(0, 1, 2); p.prepareToPlay(48000, 256);
         midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0); p.processBlock(audio, midi);
         const double rootCursor = p.getPlaybackSeconds(); const float rootAudio = audio.getSample(0, 128);
         p.prepareToPlay(48000, 256); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1, 72, 1.0f), 0); p.processBlock(audio, midi);
@@ -127,6 +134,7 @@ int main()
         check(std::abs(p.getPlaybackSeconds() - rootCursor * 2) < 0.000001, "optional MIDI pitch/speed tracking doubles speed one octave up");
         p.setMidiKeyTracking(false); midi.clear(); p.prepareToPlay(48000, 256);
 
+        p.setPlaybackSettings(1, 0);
         p.setLoopSelection(0.25, 1.25, 2.0); p.saveSlot();
         host.ppq = 0.5; p.processBlock(audio, midi);
         const double expected = 0.25 + LoopMath::phase(0.5 + 255.0 * 120.0 / (60.0 * 48000.0), 2.0);
@@ -144,11 +152,12 @@ int main()
         midi.clear();
         const float reference = audio.getSample(0, 128);
         host.ppq = 2.5; p.processBlock(audio, midi);
-        check(std::abs(audio.getSample(0, 128) - reference) < 0.00001f, "host seek/loop repeat is phase consistent");
+        juce::ignoreUnused(reference);
+        check(std::abs(p.getPlaybackSeconds() - expected) < 0.000001, "host seek/loop repeat cursor is phase consistent");
         host.bpm = 90; host.ppq = 0.5; p.processBlock(audio, midi);
         const double slower = 0.25 + LoopMath::phase(0.5 + 255.0 * 90.0 / (60.0 * 48000.0), 2.0);
         check(std::abs(p.getPlaybackSeconds() - slower) < 0.000001, "tempo change adjusts playback increment");
-        host.playing = false; p.processBlock(audio, midi);
+        host.playing = false; p.processBlock(audio, midi); p.processBlock(audio, midi);
         check(audio.getMagnitude(0, audio.getNumSamples()) == 0 && p.getPlaybackSeconds() < 0, "DAW Stop silences loop and hides cursor"); host.playing = true;
         p.setLoopSelection(0.0, 0.5, 1); p.recallSlot(0);
         check(p.getViewState().loop.start == 0.25 && p.getViewState().loop.beats == 2, "slot recall preserves region and musical length");
@@ -158,12 +167,98 @@ int main()
         check(std::abs(p.getViewState().loop.end - 1.25) < 0.000001, "multiply loop by two");
         wave->setMusicalLength(1);
         check(std::abs(p.getViewState().loop.beats - 1) < 0.000001, "Loop Length sets musical duration");
+
+        // Exercise parameter automation and all exact velocity interval edges.
+        check(p.getParameters().size() == 2 && p.slotParameter->getName(32) == "Slot"
+              && p.positionParameter->getName(32) == "Loop Position", "real host automation parameters are exposed");
+        p.setPlaybackSettings(0, 0); p.prepareToPlay(48000, 256); midi.clear(); p.processBlock(audio, midi);
+        check(audio.getMagnitude(0, 256) == 0 && p.getPlaybackSeconds() < 0, "MIDI Trigger is silent with no held note");
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 32); p.processBlock(audio, midi);
+        check(audio.getMagnitude(0, 32) == 0 && audio.getMagnitude(64, 160) > 0.01f, "Note On starts at its exact MIDI sample offset");
+        const double triggered = p.getPlaybackSeconds(); midi.clear();
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 32); p.processBlock(audio, midi);
+        check(std::abs(p.getPlaybackSeconds() - triggered) < 1e-8, "each Note On restarts the loop");
+        midi.clear(); midi.addEvent(juce::MidiMessage::noteOff(1, 60), 48); p.processBlock(audio, midi); midi.clear(); p.processBlock(audio, midi);
+        check(audio.getMagnitude(0, 256) == 0 && p.getPlaybackSeconds() < 0, "Note Off ends MIDI playback with short clickless release");
+
+        const int lows[] {1,14,27,40,52,65,78,90,103,116}, highs[] {13,26,39,51,64,77,89,102,115,127};
+        for (int slot = 0; slot < 10; ++slot)
+            check(MiniSamplerAudioProcessor::velocitySlot(lows[slot]) == slot + 1 &&
+                  MiniSamplerAudioProcessor::velocitySlot(highs[slot]) == slot + 1, "velocity maps to exact specified slot boundaries");
+        p.setLoopSelection(0.2, 0.7, 1); p.recallSlot(0); const auto stored = p.getViewState().loop;
+        p.slotParameter->setValueNotifyingHost(p.slotParameter->convertTo0to1(0)); p.processBlock(audio, midi);
+        check(std::abs(p.getViewState().loop.start - 0.2) < 1e-8, "Slot automation zero selects manual loop");
+        p.slotParameter->setValueNotifyingHost(p.slotParameter->convertTo0to1(1)); p.processBlock(audio, midi);
+        check(p.getViewState().loop.start == stored.start, "Slot automation one selects first stored loop");
+        p.setPlaybackSettings(0, 1); p.prepareToPlay(48000, 256); midi.addEvent(juce::MidiMessage::noteOn(1, 60, juce::uint8(1)), 0);
+        p.processBlock(audio, midi); check(p.getViewState().loop.start == stored.start, "velocity selects slot before triggering");
+        midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1, 60, juce::uint8(127)), 0); p.processBlock(audio, midi);
+        p.processBlock(audio, midi); check(audio.getMagnitude(0, 256) == 0, "empty velocity slot is silent, never plays wrong material");
+        p.setPlaybackSettings(0, 0); p.selectSlot(0); p.setLoopSelection(0.2, 0.7, 1); p.setLoopFades(0.02, 0.03);
+        check(p.getViewState().loop.fadeIn == 0.02 && p.getViewState().loop.fadeOut == 0.03, "independent loop fades are applied to engine state");
+
+        p.setUiSettings(5, 1, true, false, false); p.prepareToPlay(48000, 256);
+        p.positionParameter->setValueNotifyingHost(0.37f); midi.clear();
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0); p.processBlock(audio, midi);
+        const double snapStep = 0.25 * 60 / host.bpm;
+        const auto positionState = p.getViewState();
+        check(std::abs(positionState.loop.start / snapStep - std::round(positionState.loop.start / snapStep)) < 1e-7,
+              "Loop Position automation snaps to selected musical grid");
+        p.setPlaybackSettings(0, 2); p.prepareToPlay(48000, 256); midi.clear();
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, juce::uint8(80)), 0); p.processBlock(audio, midi);
+        const auto velocityPosition = p.getViewState();
+        check(std::abs(velocityPosition.loop.start / snapStep - std::round(velocityPosition.loop.start / snapStep)) < 1e-7,
+              "velocity Loop Position obeys Snap grid");
+        p.setUiSettings(5, 1, false, false, false); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1, 60, juce::uint8(80)), 0);
+        p.processBlock(audio, midi);
+        check(std::abs(p.getViewState().loop.start - 79.0 / 126 * 1.5) < 1e-6, "velocity position is continuous when Snap is off");
+
+        // Exact length, pitch and stereo coherence of the actual Signalsmith render.
+        auto rendered = renderBpmSample(*loaded, 0, 100.0 / 124, [] { return false; });
+        check(rendered && rendered->audio.getNumSamples() == int(std::llround(88200.0 * 100 / 124)), "Signalsmith 100 to 124 BPM has exact target duration");
+        const auto estimatePitch = [](const juce::AudioBuffer<float>& b, double rate)
+        {
+            int crossings = 0, first = -1, last = -1;
+            const int a = int(rate * 0.15), end = juce::jmin(b.getNumSamples() - 1, int(rate * 0.9));
+            for (int i = a + 1; i < end; ++i) if (b.getSample(0, i-1) <= 0 && b.getSample(0, i) > 0)
+            { if (first < 0) first = i; last = i; ++crossings; }
+            return crossings > 1 ? (crossings - 1) * rate / (last - first) : 0.0;
+        };
+        check(std::abs(estimatePitch(rendered->audio, rendered->rate) - 440) < 3, "Signalsmith preserves original 440 Hz pitch when BPM changes");
+        double stereoError = 0;
+        for (int i = 10000; i < 40000; ++i) stereoError += std::abs(rendered->audio.getSample(0,i) * 0.5 - rendered->audio.getSample(1,i));
+        check(stereoError / 30000 < 0.015, "Signalsmith preserves stereo channel coherence");
+        check(!renderBpmSample(*loaded, 0, 0.8, [] { return true; }), "background stretch cancellation is supported");
+        p.setPlaybackSettings(1, 0); p.selectSlot(0); p.setLoopSelection(0, 2, 4); host.bpm = 124; host.ppq = 0; p.processBlock(audio, midi);
+        check(p.matchBpm(100), "Original BPM accepts numeric sample tempo"); waitForLoad(p);
+        check(std::abs(p.getViewState().sample->duration() - 2 * 100.0 / 124) < 1.0 / 44100, "processor matches sample BPM to host BPM");
+        host.bpm = 140; p.processBlock(audio, midi);
+        juce::Thread::sleep(80); waitForLoad(p);
+        check(std::abs(p.getViewState().sample->duration() - 2 * 100.0 / 140) < 1.0 / 44100, "host tempo changes re-render original, never an already stretched buffer");
+        check(!p.matchBpm(0) && !p.matchBpm(std::numeric_limits<double>::quiet_NaN()), "invalid Original BPM is rejected");
+        p.setUiSettings(5, 1, true, false, true);
+        p.setStartOffset(0.123456); waitForLoad(p);
+        const double exactOffset = std::round(0.123456 * 44100) / 44100;
+        check(std::abs(p.getViewState().startOffset - exactOffset) < 1e-10 &&
+              p.getViewState().originalSample == loaded, "START has sample precision, ignores Snap/ZC, keeps original immutable");
+        check(std::abs(p.getViewState().sample->duration() - (2 - exactOffset) * 100 / 140) < 1.0 / 44100, "START trims logical duration before stretch");
+        p.setTheme(4);
+        juce::MemoryBlock transformedState; p.getStateInformation(transformedState);
+        MiniSamplerAudioProcessor transformedRestore;
+        transformedRestore.setStateInformation(transformedState.getData(), int(transformedState.getSize())); waitForLoad(transformedRestore);
+        check(transformedRestore.getViewState().theme == 4 && transformedRestore.getViewState().stretchApplied &&
+              transformedRestore.getViewState().startOffset == exactOffset, "theme, original BPM, START and processed state restore without embedding audio");
+        p.requestSampleLoad(file); waitForLoad(p);
+        check(p.getViewState().startOffset == 0 && !p.getViewState().stretchApplied, "new sample resets START and BPM conversion");
+        p.setTheme(0); p.setLoopSelection(0.25, 1.25, 2); p.deleteSlot(0); p.saveSlot();
+        p.setUiSettings(3, 1, true, false, false); midi.clear();
         p.setDisplaySettings(false, true);
         editor.reset(); editor.reset(p.createEditor());
         for (auto* child : editor->getChildren()) if (auto* found = dynamic_cast<MiniSamplerWaveformView*>(child)) wave = found;
         check(!wave->brightGrid && wave->stereo, "editor reopen restores grid brightness and waveform mode");
         check(p.getViewState().sample != nullptr && p.getViewState().slots.size() == 1, "closing and reopening editor keeps sample and slots");
         juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
+
         std::atomic<bool> running { true }; std::atomic<int> blocks { 0 };
         std::thread audioThread([&]
         {
@@ -196,7 +291,8 @@ int main()
               "replacing a sample retains a valid loop and saved slots");
         check(std::abs(LoopMath::phase(-0.5, 2) - 0.75) < 0.000001, "negative project PPQ wraps correctly");
         check(LoopMath::divisionBeats(1, 7, 8) == 3.5, "bar division respects time signature");
-        editor.reset(); p.setPlayHead(nullptr); file.deleteFile();
+        editor.reset(); p.setPlayHead(nullptr);
+        file.deleteFile();
         std::cout << "All MiniSampler checks passed\n"; return 0;
     }
     catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << std::endl; file.deleteFile(); return 1; }
