@@ -1,86 +1,93 @@
 #pragma once
-
 #include "PluginProcessor.h"
 
 class MiniSamplerWaveformView final : public juce::Component,
-                                      private juce::FileDragAndDropTarget,
-                                      private juce::ChangeListener
+                                     public juce::FileDragAndDropTarget,
+                                     public juce::TextDragAndDropTarget,
+                                     private juce::Timer
 {
 public:
-    explicit MiniSamplerWaveformView(juce::AudioThumbnail& thumbnailToUse);
+    explicit MiniSamplerWaveformView(MiniSamplerAudioProcessor&);
     ~MiniSamplerWaveformView() override;
-
     void paint(juce::Graphics&) override;
+    void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
-
-    void setTempoInfo(double tempo, int numerator, int denominator);
-    void setGridDivision(int divisionId);
-    void setLoopActive(bool active);
-    void clearSelection();
-    bool hasSelection() const noexcept;
-    double getSelectionStart() const noexcept { return selectionStart; }
-    double getSelectionEnd() const noexcept { return selectionEnd; }
-
-    std::function<void(const juce::File&)> onFileDropped;
-    std::function<void(double, double)> onSelectionChanged;
-    std::function<void(double, double)> onCreateLoop;
-
+    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    bool isInterestedInFileDrag(const juce::StringArray&) override;
+    void filesDropped(const juce::StringArray&, int, int) override;
+    void fileDragEnter(const juce::StringArray&, int, int) override;
+    void fileDragExit(const juce::StringArray&) override;
+    bool isInterestedInTextDrag(const juce::String&) override;
+    void textDropped(const juce::String&, int, int) override;
+    void textDragEnter(const juce::String&, int, int) override { dragOver = true; repaint(); }
+    void textDragExit(const juce::String&) override { dragOver = false; repaint(); }
+    void applySelection();
+    void setMusicalLength(double beats);
+    void scaleLength(double factor);
+    void moveLoop(double seconds);
+    void resetZoom();
+    bool stereo = true;
+    bool brightGrid = true;
+    std::function<void()> onChanged;
 private:
-    bool isInterestedInFileDrag(const juce::StringArray& files) override;
-    void filesDropped(const juce::StringArray& files, int x, int y) override;
-    void changeListenerCallback(juce::ChangeBroadcaster*) override;
-    void showContextMenu();
-    void snapSelectionToGrid();
-    double timeForX(float x) const;
-    double gridLengthSeconds() const;
-    void drawTempoGrid(juce::Graphics&, juce::Rectangle<float>) const;
-
-    juce::AudioThumbnail& thumbnail;
-    double tempo { 120.0 };
-    int numerator { 4 };
-    int denominator { 4 };
-    int gridDivisionId { 3 };
-    double selectionStart { 0.0 };
-    double selectionEnd { 0.0 };
-    bool selecting { false };
-    bool loopActive { false };
-
+    void timerCallback() override;
+    void refresh();
+    void rebuildWaveCache();
+    void commit(double, double, double beats = 0.0);
+    double snapTime(double) const;
+    double timeForX(float) const;
+    float xForTime(double) const;
+    double gridSeconds() const;
+    double duration() const;
+    double visibleLength() const;
+    juce::Rectangle<float> waveArea() const;
+    MiniSamplerAudioProcessor& processor;
+    MiniSamplerAudioProcessor::ViewState state;
+    juce::Image waveCache;
+    bool dirtyCache = true, dragOver = false, pendingSelection = false;
+    double lastResize = 0.0, viewStart = 0.0, zoom = 1.0;
+    double selectionStart = 0.0, selectionEnd = 0.0, cursor = -1.0;
+    double dragStart = 0.0, dragLoopStart = 0.0, dragLoopEnd = 0.0, dragViewStart = 0.0;
+    int dragMode = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerWaveformView)
 };
 
 class MiniSamplerAudioProcessorEditor final : public juce::AudioProcessorEditor,
-                                              private juce::Timer
+                                             public juce::FileDragAndDropTarget,
+                                             public juce::TextDragAndDropTarget,
+                                             private juce::Timer
 {
 public:
     explicit MiniSamplerAudioProcessorEditor(MiniSamplerAudioProcessor&);
     ~MiniSamplerAudioProcessorEditor() override;
-
     void paint(juce::Graphics&) override;
     void resized() override;
-
+    void mouseDown(const juce::MouseEvent&) override;
+    bool keyPressed(const juce::KeyPress&) override;
+    bool isInterestedInFileDrag(const juce::StringArray& files) override { return waveform.isInterestedInFileDrag(files); }
+    void filesDropped(const juce::StringArray& files, int x, int y) override { waveform.filesDropped(files, x, y); }
+    void fileDragEnter(const juce::StringArray& files, int x, int y) override { waveform.fileDragEnter(files, x, y); }
+    void fileDragExit(const juce::StringArray& files) override { waveform.fileDragExit(files); }
+    bool isInterestedInTextDrag(const juce::String& text) override { return waveform.isInterestedInTextDrag(text); }
+    void textDropped(const juce::String& text, int x, int y) override { waveform.textDropped(text, x, y); }
+    void textDragEnter(const juce::String& text, int x, int y) override { waveform.textDragEnter(text, x, y); }
+    void textDragExit(const juce::String& text) override { waveform.textDragExit(text); }
 private:
+    struct Tool { int id; juce::String text; juce::Rectangle<int> rect; bool active; };
     void timerCallback() override;
-    void loadSampleFile(const juce::File& file);
-    void finishSampleLoad(const juce::File& file, bool success);
-    void createLoopFromSelection(double start, double end);
-    void toggleLoop();
-
+    void layoutTools();
+    void invoke(int, bool rightClick);
+    void chooseFile();
+    void menuFor(int);
+    void handleMenu(int tool, int result);
     MiniSamplerAudioProcessor& processor;
-    juce::AudioFormatManager thumbnailFormatManager;
-    juce::AudioThumbnailCache thumbnailCache { 5 };
-    juce::AudioThumbnail thumbnail { 512, thumbnailFormatManager, thumbnailCache };
     MiniSamplerWaveformView waveform;
-    juce::TextButton loadButton { "Load" };
-    juce::ComboBox gridDivisionBox;
-    juce::TextButton loopButton { "Create loop" };
-    juce::Label sampleLabel;
+    MiniSamplerAudioProcessor::ViewState state;
+    std::vector<Tool> tools;
     std::unique_ptr<juce::FileChooser> fileChooser;
-    juce::ThreadPool sampleLoadPool { 1 };
-    double displayedTempo { 120.0 };
-    int displayedNumerator { 4 };
-    int displayedDenominator { 4 };
-
+    double lastTempo = 120.0;
+    bool lastPlaying = false;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerAudioProcessorEditor)
 };
