@@ -81,6 +81,7 @@ public:
         std::vector<Loop> slots;
         int grid = 3, segments = 1;
         bool snap = true, triplet = false, zeroCross = false, midiKeyTracking = false;
+        bool brightGrid = true, stereoWaveform = false;
         int width = 1000, height = 390;
         juce::String status;
     };
@@ -114,6 +115,7 @@ public:
     void recallSlot(int);
     void deleteSlot(int);
     void setUiSettings(int grid, int segments, bool snap, bool triplet, bool zeroCross);
+    void setDisplaySettings(bool brightGrid, bool stereoWaveform);
     void setEditorSize(int, int);
     double getProjectTempo() const { return projectTempo.load(); }
     int getProjectTimeSignatureNumerator() const { return numerator.load(); }
