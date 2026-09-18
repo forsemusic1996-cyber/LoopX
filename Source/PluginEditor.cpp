@@ -341,7 +341,7 @@ void MiniSamplerWaveformView::mouseWheelMove(const juce::MouseEvent& event, cons
 {
     if (!state.sample) return;
     const double anchor = timeForX(static_cast<float>(event.x));
-    const double fraction = juce::jlimit(0.0, 1.0, (event.x - waveArea().getX()) / juce::jmax(1.0f, waveArea().getWidth()));
+    const double fraction = juce::jlimit(0.0, 1.0, static_cast<double>((event.x - waveArea().getX()) / juce::jmax(1.0f, waveArea().getWidth())));
     if (event.mods.isShiftDown()) viewStart += wheel.deltaY * visibleLength() * 0.4;
     else { zoom = juce::jlimit(1.0, 128.0, zoom * (wheel.deltaY > 0 ? 1.25 : 0.8)); viewStart = anchor - fraction * visibleLength(); }
     viewStart = juce::jlimit(0.0, juce::jmax(0.0, duration() - visibleLength()), viewStart); dirtyCache = true; repaint();
