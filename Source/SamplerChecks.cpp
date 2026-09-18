@@ -84,11 +84,13 @@ int main()
         editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::leftButtonModifier));
         auto slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
         const int slotX = 4 + static_cast<int>((wave->getWidth() - 8) * 0.35);
-        check(slotImage.getPixelAt(slotX, wave->getHeight() - 17) == juce::Colour(0xffe07a5f), "coral slot line overlays waveform immediately without playback or timer");
-        check(slotImage.getPixelAt(slotX, wave->getHeight() - 14) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 14), "slot marker is only three pixels thick and does not occupy loop bar");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 19) == juce::Colour(0xffe07a5f), "coral slot line overlays waveform immediately without playback or timer");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 16) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 16), "slot marker is only three pixels thick and does not occupy loop bar");
+        check(slotImage.getPixelAt(slotX, wave->getHeight() - 15) != juce::Colour(0xff101315)
+              && slotImage.getPixelAt(slotX, wave->getHeight() - 6) != juce::Colour(0xff101315), "bottom loop handle is twelve pixels high");
         editor->mouseDown(eventFor(editor.get(), 98, 12, juce::ModifierKeys::rightButtonModifier));
         slotImage = wave->createComponentSnapshot(wave->getLocalBounds());
-        check(p.getViewState().slots.empty() && slotImage.getPixelAt(slotX, wave->getHeight() - 17) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 17),
+        check(p.getViewState().slots.empty() && slotImage.getPixelAt(slotX, wave->getHeight() - 19) == slotBaseline.getPixelAt(slotX, wave->getHeight() - 19),
               "deleting slot removes its line immediately without playback");
         p.setLoopSelection(0.25, 0.5, 0.5); wave->refreshFromProcessor();
         const float selectionA = 4.0f + (wave->getWidth() - 8) * 0.5f;
