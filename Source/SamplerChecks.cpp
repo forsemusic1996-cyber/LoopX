@@ -197,6 +197,18 @@ int main()
         p.setPlaybackSettings(0, 0); p.selectSlot(0); p.setLoopSelection(0.2, 0.7, 1); p.setLoopFades(0.02, 0.03);
         check(p.getViewState().loop.fadeIn == 0.02 && p.getViewState().loop.fadeOut == 0.03, "independent loop fades are applied to engine state");
 
+        // Fade drag changes audio fades independently of Snap.
+        p.setLoopSelection(0.2, 0.7, 1); wave->refreshFromProcessor();
+        const float fadeX = 4 + float((0.2 + p.getViewState().loop.fadeIn) / 2 * (wave->getWidth() - 8));
+        wave->mouseDown(eventFor(wave, fadeX, 36, juce::ModifierKeys::leftButtonModifier));
+        wave->mouseDrag(eventFor(wave, fadeX + 30, 36, juce::ModifierKeys::leftButtonModifier, true));
+        wave->mouseUp(eventFor(wave, fadeX + 30, 36, 0, true));
+        check(p.getViewState().loop.fadeIn > 0.04, "fade handle drag changes independent fade-in duration");
+        p.setUiSettings(3, 3, true, false, false); wave->refreshFromProcessor();
+        wave->mouseDown(eventFor(wave, float(wave->getWidth()) * 0.75f, 110, juce::ModifierKeys::leftButtonModifier));
+        check(p.getViewState().loop.start >= 1, "segment activates on mouse down without waiting for release");
+        wave->mouseUp(eventFor(wave, float(wave->getWidth()) * 0.75f, 110, 0));
+        p.setLoopSelection(0.2, 0.7, 1);
         p.setUiSettings(5, 1, true, false, false); p.prepareToPlay(48000, 256);
         p.positionParameter->setValueNotifyingHost(0.37f); midi.clear();
         midi.addEvent(juce::MidiMessage::noteOn(1, 60, 1.0f), 0); p.processBlock(audio, midi);
