@@ -88,6 +88,9 @@ void MiniSamplerWaveformView::refresh()
 {
     auto next = processor.getViewState();
     const bool changed = next.sample != state.sample;
+    const bool displayChanged = brightGrid != next.brightGrid || stereo != next.stereoWaveform;
+    if (stereo != next.stereoWaveform) dirtyCache = true;
+    brightGrid = next.brightGrid; stereo = next.stereoWaveform;
     bool overlaysChanged = next.loop.start != state.loop.start || next.loop.end != state.loop.end
         || next.grid != state.grid || next.segments != state.segments || next.snap != state.snap
         || next.triplet != state.triplet || next.zeroCross != state.zeroCross || next.slots.size() != state.slots.size();
@@ -98,7 +101,7 @@ void MiniSamplerWaveformView::refresh()
     state = std::move(next);
     if (changed) { dirtyCache = true; viewStart = 0; zoom = 1; pendingSelection = false; dragMode = 0; }
     if (!pendingSelection && dragMode == 0) { selectionStart = state.loop.start; selectionEnd = state.loop.end; }
-    if (changed || overlaysChanged) repaint();
+    if (changed || overlaysChanged || displayChanged) repaint();
 }
 void MiniSamplerWaveformView::resized()
 {
@@ -168,7 +171,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(0xff101315));
     const auto area = waveArea();
-    g.setColour(juce::Colour(0xff21252a)); g.fillRect(0, 0, getWidth(), 24);
+    g.setColour(juce::Colour(0xff303234)); g.fillRect(0, 0, getWidth(), 24);
     if (!state.sample)
     {
         g.setColour(juce::Colour(0xffa6b1bc)); g.setFont(14.0f);
@@ -192,7 +195,6 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         g.setColour(bar ? juce::Colour(brightGrid ? 0xff519b9d : 0xff375b5e)
                         : juce::Colour(brightGrid ? 0xff343f42 : 0xff252d30));
         g.drawVerticalLine(static_cast<int>(x), area.getY(), area.getBottom());
-        if (bar) { g.setFont(11.0f); g.drawText(juce::String(static_cast<int>(std::round(t / barSeconds)) + 1), static_cast<int>(x) + 3, 10, 48, 14, juce::Justification::centredLeft); }
     }
     if (state.segments > 1)
     {
@@ -209,7 +211,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
     if (state.loop.end > state.loop.start)
     {
         const auto selection = juce::Rectangle<float>(startX, area.getY(), endX - startX, area.getHeight()).getIntersection(area);
-        g.setColour(juce::Colour(0x354cb8b7)); g.fillRect(selection);
+        g.setColour(juce::Colour(0x604b8585)); g.fillRect(selection);
         g.setColour(juce::Colour(0xff66cecd));
         for (const float x : { startX, endX })
             if (x >= area.getX() && x <= area.getRight()) g.drawLine(x, area.getY(), x, area.getBottom(), 1.0f);
@@ -224,8 +226,25 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
     if (pendingSelection && selectionEnd != selectionStart)
     {
         const float a = xForTime(juce::jmin(selectionStart, selectionEnd)), b = xForTime(juce::jmax(selectionStart, selectionEnd));
-        g.setColour(juce::Colour(0x60699fef));
+        g.setColour(juce::Colour(0x90548787));
         g.fillRect(juce::Rectangle<float>(a, area.getY(), b - a, area.getHeight()).getIntersection(area));
+    }
+    // Musical labels overlay the waveform, never the scrollbar strip.
+    const double signatureBeat = beatSeconds * 4.0 / processor.getProjectTimeSignatureDenominator();
+    const int labelStride = juce::jmax(1, static_cast<int>(std::ceil(48.0 / juce::jmax(0.0001, signatureBeat / visibleLength() * area.getWidth()))));
+    const double labelStep = signatureBeat * labelStride;
+    g.setColour(juce::Colour(0xff8b989a)); g.setFont(11.0f);
+    for (double t = std::floor(viewStart / labelStep) * labelStep; t <= viewStart + visibleLength(); t += labelStep)
+    {
+        const float x = xForTime(t);
+        if (x < area.getX() || x > area.getRight() - 8.0f) continue;
+        const auto beatIndex = static_cast<juce::int64>(std::llround(t / signatureBeat));
+        const int numerator = processor.getProjectTimeSignatureNumerator();
+        const auto barIndex = beatIndex / numerator + 1;
+        const int beatInBar = static_cast<int>(beatIndex % numerator) + 1;
+        const auto label = juce::String(barIndex) + (beatInBar == 1 ? juce::String{} : "." + juce::String(beatInBar));
+        g.drawText(label, static_cast<int>(x) + 3, static_cast<int>(area.getY()) + 2,
+                   juce::jmin(46, static_cast<int>(area.getRight() - x - 3)), 14, juce::Justification::centredLeft);
     }
     for (size_t i = 0; i < state.slots.size(); ++i)
     {
@@ -241,13 +260,13 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
     }
     if (cursor >= viewStart && cursor <= viewStart + visibleLength())
     {
-        g.setColour(juce::Colour(0xff66cecd)); g.drawLine(xForTime(cursor), 10.0f, xForTime(cursor), area.getBottom(), 2.0f);
+        g.setColour(juce::Colour(0xff66cecd)); g.drawLine(xForTime(cursor), area.getY(), xForTime(cursor), area.getBottom(), 2.0f);
     }
-    const auto track = juce::Rectangle<float>(4.0f, 2.0f, getWidth() - 8.0f, 7.0f);
+    const auto track = juce::Rectangle<float>(4.0f, 0.0f, getWidth() - 8.0f, area.getY());
     const float thumbWidth = juce::jmax(18.0f, track.getWidth() / static_cast<float>(zoom));
     const float thumbX = track.getX() + static_cast<float>(viewStart / juce::jmax(1.0e-9, duration() - visibleLength())) * (track.getWidth() - thumbWidth);
-    g.setColour(juce::Colour(0xff303741)); g.fillRoundedRectangle(track, 3.0f);
-    g.setColour(juce::Colour(dragMode == 6 ? 0xffaac0d4 : 0xff64798c));
+    g.setColour(juce::Colour(0xff303234)); g.fillRoundedRectangle(track, 3.0f);
+    g.setColour(juce::Colour(dragMode == 6 ? 0xff686a6c : 0xff484a4c));
     g.fillRoundedRectangle({ thumbX, track.getY(), thumbWidth, track.getHeight() }, 3.0f);
     if (dragOver)
     {
@@ -302,7 +321,7 @@ void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
     dragStart = event.x; dragLoopStart = state.loop.start; dragLoopEnd = state.loop.end; dragViewStart = viewStart;
     if (event.mods.isMiddleButtonDown()) { dragMode = 5; return; }
     if (!event.mods.isLeftButtonDown()) return;
-    if (event.y >= 0 && event.y <= 11 && event.x >= 4 && event.x <= getWidth() - 4)
+    if (event.y >= 0 && event.y < waveArea().getY() && event.x >= 4 && event.x <= getWidth() - 4)
     {
         const double trackWidth = juce::jmax(1, getWidth() - 8);
         const double thumbWidth = juce::jmax(18.0, trackWidth / zoom);
@@ -505,8 +524,8 @@ void MiniSamplerAudioProcessorEditor::handleMenu(int id, int result)
                                 state.snap, id == settings ? !state.triplet : state.triplet, state.zeroCross);
     else if (id == settings)
     {
-        if (result == 2) { waveform.stereo = !waveform.stereo; waveform.resetZoom(); }
-        if (result == 3) { waveform.brightGrid = !waveform.brightGrid; waveform.repaint(); }
+        if (result == 2) { processor.setDisplaySettings(state.brightGrid, !state.stereoWaveform); waveform.resetZoom(); }
+        if (result == 3) processor.setDisplaySettings(!state.brightGrid, state.stereoWaveform);
         if (result == 4) waveform.resetZoom();
         if (result == 6) processor.setMidiKeyTracking(!state.midiKeyTracking);
         if (result == 5) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "Mini Sampler / LoopX",
