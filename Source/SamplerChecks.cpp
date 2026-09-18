@@ -28,6 +28,18 @@ struct Transport final : juce::AudioPlayHead
         p.setTimeSignature(TimeSignature { 4, 4 }); return p;
     }
 };
+struct StateQueryHost final : juce::AudioProcessorListener
+{
+    int changes=0;
+    void query(juce::AudioProcessor* p)
+    {
+        // Simulate a host obtaining its state on a second thread while a
+        // synchronous notification is being handled. Must not hold stateLock.
+        std::thread reader([p]{juce::MemoryBlock state; p->getStateInformation(state);}); reader.join(); ++changes;
+    }
+    void audioProcessorParameterChanged(juce::AudioProcessor* p,int,float) override { query(p); }
+    void audioProcessorChanged(juce::AudioProcessor* p,const ChangeDetails&) override { query(p); }
+};
 }
 
 int main()
@@ -43,7 +55,7 @@ int main()
         std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(file.createOutputStream().release(), 44100, 2, 16, {}, 0));
         check(writer != nullptr && writer->writeFromAudioSampleBuffer(source, 0, source.getNumSamples()), "test WAV creation"); writer.reset();
 
-        MiniSamplerAudioProcessor p;
+        MiniSamplerAudioProcessor p(juce::File{});
         check(!p.getViewState().brightGrid, "Bright Grid is OFF by default");
         Transport host; p.setPlayHead(&host); p.prepareToPlay(48000, 256);
         juce::AudioBuffer<float> audio(2, 256); juce::MidiBuffer midi;
@@ -262,7 +274,7 @@ int main()
         check(std::abs(p.getViewState().sample->duration() - (2 - exactOffset) * 100 / 140) < 1.0 / 44100, "START trims logical duration before stretch");
         p.setTheme(4);
         juce::MemoryBlock transformedState; p.getStateInformation(transformedState);
-        MiniSamplerAudioProcessor transformedRestore;
+        MiniSamplerAudioProcessor transformedRestore(juce::File{});
         transformedRestore.setStateInformation(transformedState.getData(), int(transformedState.getSize())); waitForLoad(transformedRestore);
         check(transformedRestore.getViewState().theme == 4 && transformedRestore.getViewState().stretchApplied &&
               transformedRestore.getViewState().startOffset == exactOffset, "theme, original BPM, START and processed state restore without embedding audio");
@@ -295,7 +307,7 @@ int main()
         std::cout << "Resize stress: " << elapsed << " ms, " << blocks << " audio blocks\n";
         p.setUiSettings(5, 3, false, true, true); p.setMidiKeyTracking(true); p.setDisplaySettings(false, true);
         juce::MemoryBlock saved; p.getStateInformation(saved);
-        MiniSamplerAudioProcessor restored; restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize())); waitForLoad(restored);
+        MiniSamplerAudioProcessor restored(juce::File{}); restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize())); waitForLoad(restored);
         const auto restoredState = restored.getViewState();
         check(restoredState.slots.size() == 1 && restoredState.grid == 5 && restoredState.segments == 3 && restoredState.zeroCross
               && restoredState.triplet && !restoredState.snap && restoredState.midiKeyTracking && !restoredState.brightGrid && restoredState.stereoWaveform,
@@ -309,6 +321,91 @@ int main()
               "replacing a sample retains a valid loop and saved slots");
         check(std::abs(LoopMath::phase(-0.5, 2) - 0.75) < 0.000001, "negative project PPQ wraps correctly");
         check(LoopMath::divisionBeats(1, 7, 8) == 3.5, "bar division respects time signature");
+
+        // START may clip a source region but must never alter its seconds/beat.
+        p.setPlaybackSettings(0,0); p.setLoopSelection(0,2,4); p.setStartOffset(0.4); waitForLoad(p);
+        auto beforeStart=p.getViewState().loop;
+        check(std::abs((beforeStart.end-beforeStart.start)/beforeStart.beats-0.5)<1e-7,
+              "START changes only source offset, keeps loop speed when a boundary clips");
+        p.setStartOffset(0.8); waitForLoad(p);
+        const auto afterStart=p.getViewState().loop;
+        check(std::abs((afterStart.end-afterStart.start)/afterStart.beats-0.5)<1e-7,
+              "repeated START edits do not accumulate playback speed changes");
+        p.requestSampleLoad(file); waitForLoad(p); p.setLoopSelection(0.1,0.6,1);
+        p.setLoopEnabled(false); p.prepareToPlay(48000,256); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,60,1.0f),0); p.processBlock(audio,midi);
+        check(audio.getMagnitude(0,256)==0,"Loop toggle OFF is silent");
+        p.setLoopEnabled(true); p.processBlock(audio,midi); check(audio.getMagnitude(0,256)>0.01,"Loop toggle ON retains existing region");
+
+        p.deleteSlot(0); p.setLoopSelection(0.1,0.6,1); p.saveSlot(); p.setLoopSelection(0.8,1.3,1); p.saveSlot();
+        p.setNoteSettings(1,60); p.setPlaybackSettings(0,0); p.prepareToPlay(48000,256);
+        midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,61,juce::uint8(80)),17); p.processBlock(audio,midi);
+        check(p.getViewState().loop.start==0.8 && p.getPlaybackSeconds()>=0.8 && p.getPlaybackSeconds()<0.81,
+              "MIDI Note -> Slot selects the correct stored region at Note On offset");
+        check(p.getNameForMidiNoteNumber(60,1)==std::optional<juce::String>{"Slot 1"} &&
+              p.getNameForMidiNoteNumber(61,2)==std::optional<juce::String>{"Slot 2"} && !p.getNameForMidiNoteNumber(-1,1),
+              "JUCE note-name callback exports slot labels and validates note range");
+        p.selectSlot(0); p.setLoopSelection(0.1,0.6,1); p.setUiSettings(5,1,true,false,false); p.setNoteSettings(2,60);
+        host.bpm=120; host.ppq=0; p.prepareToPlay(48000,256);
+        midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,3,juce::uint8(90)),0); p.processBlock(audio,midi);
+        const auto noteRegion=p.getViewState().loop;
+        check(std::abs(noteRegion.start-0.375)<1e-7 && std::abs(noteRegion.end-noteRegion.start-0.5)<1e-7 && noteRegion.beats==1,
+              "MIDI Note -> Position uses grid divisions and preserves length / speed without banks");
+        check(p.getNameForMidiNoteNumber(127,1)==std::optional<juce::String>{"Grid 128"},"all 128 MIDI notes have position labels");
+        midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,127,1.0f),0); p.processBlock(audio,midi);
+        check(std::abs(p.getViewState().loop.start-1.5)<1e-7,"position beyond sample clamps to last valid start");
+        p.setNoteSettings(0,60); midi.clear(); p.positionParameter->setValueNotifyingHost(0.2f); p.processBlock(audio,midi);
+        check(std::abs(p.getViewState().loop.start-0.25)<1e-7,"host position automation is visible after MIDI movement and follows Snap");
+        p.setUiSettings(5,1,false,false,false); p.positionParameter->setValueNotifyingHost(0.2f); p.processBlock(audio,midi);
+        check(std::abs(p.getViewState().loop.start-0.3)<1e-6,"host position automation is continuous with Snap OFF");
+
+        auto palette=loopXPalette(2); palette.selection=juce::Colour(0x48112233); palette.loopFill=juce::Colour(0x80336699);
+        palette.slot=juce::Colour(0xffee9955); palette.grid=juce::Colour(0xff574b67); palette.scrollThumb=juce::Colour(0xff807060);
+        p.setCustomTheme(palette,"My Studio"); p.saveUserTheme("My Studio");
+        const auto themeFile=p.exportTheme(); LoopXPalette parsed; juce::String parsedName;
+        check(loopXReadTheme(juce::JSON::parse(themeFile),parsed,parsedName) && parsed==palette && parsedName=="My Studio",
+              "theme JSON round-trips all 33 colours including independent alpha");
+        check(!p.importTheme("{}") && p.getViewState().palette==palette,"invalid theme imports leave current palette untouched");
+        check(p.renameUserTheme(0,"Renamed Studio") && p.loadUserTheme(0) && p.getViewState().themeName=="Renamed Studio",
+              "user themes can be saved, renamed and reloaded without changing built-ins");
+        p.setUiSettings(6,4,false,false,true); p.setDisplaySettings(true,true); p.setNoteSettings(1,48);
+        juce::MemoryBlock completeState; p.getStateInformation(completeState);
+        MiniSamplerAudioProcessor fresh(juce::File{}); fresh.setTheme(4); fresh.setUiSettings(1,1,true,false,false);
+        fresh.setStateInformation(completeState.getData(),int(completeState.getSize())); waitForLoad(fresh);
+        const auto complete=fresh.getViewState();
+        check(complete.palette==palette && complete.customTheme && complete.themeName=="Renamed Studio" && complete.grid==6 && complete.segments==4 &&
+              !complete.snap && complete.zeroCross && complete.brightGrid && complete.stereoWaveform && complete.noteMode==1 && complete.rootNote==48,
+              "fresh processor restores full theme + last grid settings; DAW state overrides defaults");
+        auto* freshEditor=static_cast<MiniSamplerAudioProcessorEditor*>(fresh.createEditor());
+        MiniSamplerWaveformView* freshWave=nullptr;
+        for(auto* child:freshEditor->getChildren()) if(auto* w=dynamic_cast<MiniSamplerWaveformView*>(child)) freshWave=w;
+        check(freshWave && freshWave->brightGrid && freshWave->stereo,"restored editor uses project settings, not constructor defaults");
+        // Background/BPM panel and its timer are destroyed synchronously with editor.
+        freshEditor->mouseDown(eventFor(freshEditor,float(freshEditor->getWidth()-320),12,juce::ModifierKeys::leftButtonModifier));
+        delete freshEditor; juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
+
+        const auto prefs=file.getSiblingFile(file.getFileNameWithoutExtension()+"-settings.json");
+        { MiniSamplerAudioProcessor first(prefs); first.setCustomTheme(palette,"Persistent"); first.saveUserTheme("Persistent"); first.setUiSettings(6,4,false,false,true); }
+        { MiniSamplerAudioProcessor second(prefs); const auto s=second.getViewState();
+          check(s.grid==6 && s.segments==4 && !s.snap && s.zeroCross && s.palette==palette && s.themeName=="Persistent",
+                "plugin deletion / new instance restores last-used theme and grid from preferences"); }
+        prefs.deleteFile();
+        StateQueryHost queried; fresh.addListener(&queried);
+        fresh.setTheme(1); fresh.setUiSettings(2,2,true,false,false); fresh.setLoopSelection(0,0.5,1);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(80);
+        check(queried.changes>0,"host state queries during notifications do not deadlock loader / UI"); fresh.removeListener(&queried);
+
+        const auto shutdownStart=juce::Time::getMillisecondCounterHiRes();
+        for(int n=0;n<12;++n)
+        {
+            auto closing=std::make_unique<MiniSamplerAudioProcessor>(juce::File{}); closing->requestSampleLoad(file); waitForLoad(*closing);
+            closing->matchBpm(80); auto closingEditor=std::unique_ptr<juce::AudioProcessorEditor>(closing->createEditor());
+            closingEditor->mouseDown(eventFor(closingEditor.get(),float(closingEditor->getWidth()-320),12,juce::ModifierKeys::leftButtonModifier));
+            closingEditor.reset(); closing.reset();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(2);
+        }
+        check(juce::Time::getMillisecondCounterHiRes()-shutdownStart<10000,"repeated unload during rendering with an open BPM panel completes promptly");
+        MiniSamplerSample cancelling; cancelling.audio.makeCopyOf(source);
+        check(!cancelling.buildWaveform([]{return true;}),"peak building supports immediate cooperative cancellation");
         editor.reset(); p.setPlayHead(nullptr);
         file.deleteFile();
         std::cout << "All MiniSampler checks passed\n"; return 0;
