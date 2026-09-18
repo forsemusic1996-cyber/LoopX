@@ -22,8 +22,10 @@ void MiniSamplerAudioProcessor::prepareToPlay(double rate, int)
 {
     outputRate = juce::jmax(1.0, rate); fallbackBeat = 0; expectedBeat = 0;
     heldNotes = {}; noteOrder = 0; loopMidiNote = 60; midiPhase = 0; gateGain = 0;
-    lastAudioSample = nullptr; lastParameterSlot = -1; lastMode = -1;
+    lastAudioSample = nullptr; lastParameterSlot = slotParameter->get(); selectedSlot = lastParameterSlot; lastMode = -1;
+    lastSelectionVersion = slotSelectionVersion.load(); lastVelocity = velocityMode.load();
     lastPositionParameter = positionParameter->get(); engine.prepare(outputRate);
+    outputTail = {}; switchTail = {}; switchFade = 0; previousValid = false;
 }
 bool MiniSamplerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout) const
 {
@@ -69,6 +71,10 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     const int mode = playbackMode.load(), velocity = velocityMode.load();
     if (mode != lastMode) { heldNotes = {}; gateGain = 0; engine.clear(); midiPhase = 0; lastMode = mode; }
     const int parameterSlot = slotParameter->get();
+    if (velocity != lastVelocity) { selectedSlot = parameterSlot; lastVelocity = velocity; midiPhase = 0; }
+    const auto selectionVersion = slotSelectionVersion.load();
+    if (selectionVersion != lastSelectionVersion)
+    { selectedSlot = requestedSlot.load(); lastSelectionVersion = selectionVersion; midiPhase = 0; }
     if (parameterSlot != lastParameterSlot)
     { selectedSlot = parameterSlot; lastParameterSlot = parameterSlot; livePosition.store(-1); midiPhase = 0; }
     const float position = positionParameter->get();
@@ -118,14 +124,27 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
             region.start = juce::jlimit(0.0, juce::jmax(0.0, logicalDuration - len), region.start); region.end = region.start + len;
         }
         const bool valid = loopEnabled.load() && region.end > region.start + 0.00001 && region.beats > 0;
-        if (!valid) { gateGain = 0; continue; }
+        if (!valid)
+        {
+            if (previousValid) { switchTail = outputTail; switchFade = 96; }
+            previousValid = false; gateGain = 0;
+            for (int ch = 0; ch < 2; ++ch) outputTail[size_t(ch)] = switchFade > 0 ? switchTail[size_t(ch)] * float(switchFade - 1) / 96 : 0;
+            if (switchFade > 0) --switchFade;
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch) buffer.setSample(ch, i, outputTail[size_t(juce::jmin(ch,1))]);
+            continue;
+        }
+        previousValid = true;
         if (region.start != audioLoop.start || region.end != audioLoop.end || region.beats != audioLoop.beats)
         { audioLoop = region; midiPhase = 0; restart = true; }
         const double pitch = midiKeyTracking.load() ? std::pow(2.0, (loopMidiNote - 60) / 12.0) : 1;
         const double phase = mode == 1 ? LoopMath::phase((beat + i * beatStep) * pitch, region.beats) : midiPhase;
         const double a = (offset + region.start) * sample->rate, b = (offset + region.end) * sample->rate;
         const double step = sample->rate / outputRate * pitch;
-        if (restart || (seek && mode == 1 && i == 0)) engine.reset(a + phase * (b - a), step);
+        if (restart || (seek && mode == 1 && i == 0))
+        {
+            engine.reset(a + phase * (b - a), step);
+            switchTail = outputTail; switchFade = 96;
+        }
         const bool audible = mode == 0 ? gate : (!connected || playing);
         gateGain += juce::jlimit(-1.0 / 96, 1.0 / 96, (audible ? 1.0 : 0.0) - gateGain);
         if (gateGain > 0 || audible)
@@ -135,8 +154,16 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
             const double inGain = region.fadeIn > 0 ? phase * lengthSeconds / region.fadeIn : 1;
             const double outGain = region.fadeOut > 0 ? (1 - phase) * lengthSeconds / region.fadeOut : 1;
             const float gain = float(gateGain * juce::jlimit(0.0, 1.0, juce::jmin(inGain, outGain)));
-            for (int ch = 0; ch < buffer.getNumChannels(); ++ch) buffer.setSample(ch, i, value[size_t(juce::jmin(ch, 1))] * gain);
+            for (int ch = 0; ch < buffer.getNumChannels(); ++ch) {
+                const auto index = size_t(juce::jmin(ch, 1));
+                const float fresh = value[index] * gain;
+                const float mix = switchFade > 0 ? float(97 - switchFade) / 96 : 1;
+                const float result = switchTail[index] + mix * (fresh - switchTail[index]);
+                buffer.setSample(ch, i, result); outputTail[index] = result;
+            }
         }
+        else outputTail = {};
+        if (switchFade > 0) --switchFade;
         if (audible) cursor = region.start + phase * (region.end - region.start);
         if (mode == 0) { midiPhase += beatStep * pitch / region.beats; midiPhase -= std::floor(midiPhase); }
     }
@@ -305,7 +332,7 @@ void MiniSamplerAudioProcessor::stopLoop() { loopEnabled.store(false); }
 void MiniSamplerAudioProcessor::selectSlot(int slot)
 {
     slotParameter->beginChangeGesture(); slotParameter->setValueNotifyingHost(slotParameter->convertTo0to1(juce::jlimit(0, 10, slot))); slotParameter->endChangeGesture();
-    liveSlot.store(slot); livePosition.store(-1);
+    liveSlot.store(slot); livePosition.store(-1); requestedSlot.store(slot); ++slotSelectionVersion;
 }
 void MiniSamplerAudioProcessor::saveSlot()
 {
