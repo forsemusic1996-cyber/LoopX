@@ -80,7 +80,7 @@ public:
         Loop loop;
         std::vector<Loop> slots;
         int grid = 3, segments = 1;
-        bool snap = true, triplet = false, zeroCross = false;
+        bool snap = true, triplet = false, zeroCross = false, midiKeyTracking = false;
         int width = 1000, height = 390;
         juce::String status;
     };
@@ -121,12 +121,18 @@ public:
     double getPlaybackSeconds() const { return playbackSeconds.load(); }
     bool isHostPlaying() const { return hostPlaying.load(); }
     bool hasHostPosition() const { return hostConnected.load(); }
+    void setMidiKeyTracking(bool enabled)
+    {
+        const juce::ScopedLock lock(stateLock);
+        state.midiKeyTracking = enabled; midiKeyTracking.store(enabled);
+    }
 private:
     void run() override;
     void publishLoop(const Loop&);
     struct Voice { double position = 0, step = 1; float gain = 0; int note = -1; };
     std::array<Voice, 16> voices {};
     double outputRate = 44100.0, fallbackBeat = 0.0;
+    int loopMidiNote = 60;
     Loop audioLoop;
     const MiniSamplerSample* lastAudioSample = nullptr;
     std::atomic<const MiniSamplerSample*> audioSample { nullptr };
@@ -139,6 +145,7 @@ private:
     bool pendingRestore = false;
     uint64_t requestVersion = 0;
     std::atomic<bool> loading { false };
+    std::atomic<bool> midiKeyTracking { false };
     std::atomic<double> projectTempo { 120.0 }, playbackSeconds { -1.0 };
     std::atomic<int> numerator { 4 }, denominator { 4 };
     std::atomic<bool> hostPlaying { false }, hostConnected { false }, loopEnabled { false };
