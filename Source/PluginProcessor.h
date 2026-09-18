@@ -33,6 +33,9 @@ public:
     void setStateInformation(const void*, int) override {}
 
     bool loadSample(const juce::File& file);
+    void setLoopSelection(double startSeconds, double endSeconds);
+    void stopLoop();
+    bool isLooping() const noexcept { return loopEnabled.load(); }
     juce::String getLoadedSampleName() const;
     double getProjectTempo() const noexcept { return projectTempo.load(); }
     int getProjectTimeSignatureNumerator() const noexcept { return timeSignatureNumerator.load(); }
@@ -49,6 +52,12 @@ private:
     std::atomic<double> projectTempo { 120.0 };
     std::atomic<int> timeSignatureNumerator { 4 };
     std::atomic<int> timeSignatureDenominator { 4 };
+    std::shared_ptr<juce::AudioBuffer<float>> loopSampleBuffer;
+    std::atomic<double> loopSampleRate { 44100.0 };
+    std::atomic<double> loopStartSample { 0.0 };
+    std::atomic<double> loopEndSample { 0.0 };
+    std::atomic<double> loopPosition { 0.0 };
+    std::atomic<bool> loopEnabled { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerAudioProcessor)
 };
