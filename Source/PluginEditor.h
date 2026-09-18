@@ -21,6 +21,8 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
     void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
     bool isInterestedInFileDrag(const juce::StringArray&) override;
     void filesDropped(const juce::StringArray&, int, int) override;
@@ -35,6 +37,8 @@ public:
     void scaleLength(double factor);
     void moveLoop(double seconds);
     void resetZoom();
+    void toggleStart();
+    bool isEditingStart() const { return editingStart; }
     void refreshFromProcessor() { refresh(); repaint(); }
     bool stereo = false;
     bool brightGrid = false;
@@ -49,6 +53,8 @@ private:
     float xForTime(double) const;
     double gridSeconds() const;
     double duration() const;
+    const MiniSamplerSample* drawingSample() const;
+    int hitTestTool(float x, float y) const;
     double visibleLength() const;
     juce::Rectangle<float> waveArea() const;
     MiniSamplerAudioProcessor& processor;
@@ -59,6 +65,8 @@ private:
     double selectionStart = 0.0, selectionEnd = 0.0, cursor = -1.0;
     double dragStart = 0.0, dragLoopStart = 0.0, dragLoopEnd = 0.0, dragViewStart = 0.0;
     int dragMode = 0;
+    bool editingStart = false;
+    double draftStart = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerWaveformView)
 };
 
@@ -74,6 +82,8 @@ public:
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
     bool keyPressed(const juce::KeyPress&) override;
+    void mouseMove(const juce::MouseEvent&) override;
+    void mouseExit(const juce::MouseEvent&) override;
     bool isInterestedInFileDrag(const juce::StringArray& files) override { return waveform.isInterestedInFileDrag(files); }
     void filesDropped(const juce::StringArray& files, int x, int y) override { waveform.filesDropped(files, x, y); }
     void fileDragEnter(const juce::StringArray& files, int x, int y) override { waveform.fileDragEnter(files, x, y); }
@@ -88,6 +98,7 @@ private:
     void layoutTools();
     void invoke(int, bool rightClick);
     void chooseFile();
+    void showBpm();
     void menuFor(int);
     void handleMenu(int tool, int result);
     MiniSamplerAudioProcessor& processor;
