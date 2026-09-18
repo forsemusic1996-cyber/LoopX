@@ -60,8 +60,7 @@ void MiniSamplerAudioProcessor::writeDiagnostic(const juce::String& message) con
 {
     const auto logFile = juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
                              .getChildFile("MiniSampler-diagnostics.log");
-    logFile.appendText(juce::Time::getCurrentTime().toISO8601(true) + " " + message + "
-",
+    logFile.appendText(juce::Time::getCurrentTime().toISO8601(true) + " " + message + juce::String::charToString(10),
                        false, false, "UTF-8");
 }
 
