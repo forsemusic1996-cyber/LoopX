@@ -105,8 +105,8 @@ void MiniSamplerWaveformView::refresh()
     auto next = processor.getViewState();
     const bool changed = next.sample != state.sample;
     if (state.originalSample && next.originalSample != state.originalSample) editingStart = false;
-    const bool displayChanged = brightGrid != next.brightGrid || stereo != next.stereoWaveform || state.theme != next.theme;
-    if (state.theme != next.theme) dirtyCache = true;
+    const bool displayChanged = brightGrid != next.brightGrid || stereo != next.stereoWaveform || state.palette != next.palette;
+    if (state.palette != next.palette) dirtyCache = true;
     if (stereo != next.stereoWaveform) dirtyCache = true;
     brightGrid = next.brightGrid; stereo = next.stereoWaveform;
     bool overlaysChanged = next.loop.start != state.loop.start || next.loop.end != state.loop.end
@@ -144,10 +144,11 @@ void MiniSamplerWaveformView::rebuildWaveCache()
         const float band = static_cast<float>(height) / channels;
         const float centre = band * (ch + 0.5f);
         const float scale = band * 0.46f;
-        const auto palette = loopXPalette(state.theme);
-        g.setColour(ch == 0 ? palette.wave : palette.wave2);
+        const auto palette = state.palette;
         const double firstSample = (viewStart + (editingStart ? 0 : state.playbackOffset)) * sample->rate;
         const double samplesPerPixel = visibleLength() * sample->rate / width;
+        const float distant = float(juce::jlimit(0.0,1.0,std::log2(juce::jmax(1.0,samplesPerPixel/64.0))/5.0));
+        g.setColour((ch == 0 ? palette.wave : palette.wave2).withMultipliedAlpha(1.0f-0.25f*distant));
         if (samplesPerPixel < 1.0)
         {
             juce::Path path;
@@ -164,12 +165,23 @@ void MiniSamplerWaveformView::rebuildWaveCache()
             g.strokePath(path, juce::PathStrokeType(density));
             continue;
         }
+        std::vector<std::pair<float,float>> ranges; ranges.reserve(size_t(width));
         for (int x = 0; x < width; ++x)
         {
             const int a = static_cast<int>(firstSample + x * samplesPerPixel);
             const int b = static_cast<int>(std::ceil(firstSample + (x + 1) * samplesPerPixel));
             const auto range = sample->waveformRange(ch, a, b);
-            g.drawVerticalLine(x, centre - range.second * scale, centre - range.first * scale + density * 0.5f);
+            ranges.push_back(range);
+            if (distant <= 0) g.drawVerticalLine(x, centre - range.second * scale, centre - range.first * scale + density * 0.5f);
+        }
+        if (distant > 0)
+        {
+            // Anti-aliased continuous envelope, still passing through the
+            // original min/max of every pixel. No averaging away transients.
+            juce::Path envelope; envelope.startNewSubPath(0,centre-ranges.front().second*scale);
+            for (int x=1; x<width; ++x) envelope.lineTo(float(x),centre-ranges[size_t(x)].second*scale);
+            for (int x=width-1; x>=0; --x) envelope.lineTo(float(x),centre-ranges[size_t(x)].first*scale);
+            envelope.closeSubPath(); g.fillPath(envelope); g.strokePath(envelope,juce::PathStrokeType(0.5f));
         }
     }
     repaint();
@@ -191,15 +203,15 @@ void MiniSamplerWaveformView::timerCallback()
 }
 void MiniSamplerWaveformView::paint(juce::Graphics& g)
 {
-    const auto palette = loopXPalette(state.theme);
+    const auto palette = state.palette;
     g.fillAll(palette.background);
     const auto area = waveArea();
-    g.setColour(juce::Colour(0xff303234)); g.fillRect(0, 0, getWidth(), 14);
+    g.setColour(palette.scrollTrack); g.fillRect(0, 0, getWidth(), 14);
     if (!state.sample)
     {
-        g.setColour(juce::Colour(0xffa6b1bc)); g.setFont(14.0f);
+        g.setColour(palette.text); g.setFont(14.0f);
         g.drawText(dragOver ? "Release to load sample" : "Drop audio here or use Settings > Load audio file", area, juce::Justification::centred);
-        if (dragOver) { g.setColour(juce::Colour(0xff66ddc9)); g.drawRect(getLocalBounds(), 3); }
+        if (dragOver) { g.setColour(palette.dropBorder); g.drawRect(getLocalBounds(), 3); }
         return;
     }
     g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
@@ -216,8 +228,8 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         const float x = xForTime(t);
         if (x < area.getX() || x > area.getRight()) continue;
         const bool bar = std::abs(t / barSeconds - std::round(t / barSeconds)) < 0.00001;
-        g.setColour(bar ? juce::Colour(brightGrid ? 0xff519b9d : 0xff375b5e)
-                        : juce::Colour(brightGrid ? 0xff343f42 : 0xff252d30));
+        g.setColour(bar ? (brightGrid ? palette.gridBarBright : palette.gridBar)
+                        : (brightGrid ? palette.gridBright : palette.grid));
         g.drawVerticalLine(static_cast<int>(x), area.getY(), area.getBottom());
     }
     if (!editingStart && state.segments > 1)
@@ -228,15 +240,15 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         for (double t = std::floor(viewStart / drawStep) * drawStep; t <= viewStart + visibleLength(); t += drawStep)
         {
             g.setColour(palette.segment);
-            g.drawLine(xForTime(t), area.getY(), xForTime(t), area.getBottom(), 2.0f);
+            g.drawLine(xForTime(t), area.getY(), xForTime(t), area.getBottom(), 1.0f);
         }
     }
     const float startX = xForTime(state.loop.start), endX = xForTime(state.loop.end);
     if (!editingStart && state.loop.end > state.loop.start)
     {
         const auto selection = juce::Rectangle<float>(startX, area.getY(), endX - startX, area.getHeight()).getIntersection(area);
-        g.setColour(juce::Colour(0x604b8585)); g.fillRect(selection);
-        g.setColour(palette.accent);
+        g.setColour(palette.loopFill); g.fillRect(selection);
+        g.setColour(palette.loopBorder);
         for (const float x : { startX, endX })
             if (x >= area.getX() && x <= area.getRight()) g.drawLine(x, area.getY(), x, area.getBottom(), 1.0f);
         juce::Path flags;
@@ -244,13 +256,13 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         if (endX >= area.getX() && endX <= area.getRight()) flags.addTriangle(endX, area.getY(), endX - 10, area.getY(), endX, area.getY() + 10);
         g.fillPath(flags);
         const auto loopBar = juce::Rectangle<float>(startX, area.getBottom(), endX - startX, 14.0f).getIntersection(getLocalBounds().toFloat());
-        g.setColour(juce::Colour(0xff426f74)); g.fillRoundedRectangle(loopBar, 2.0f);
-        g.setColour(juce::Colour(0xff66cecd)); g.drawRoundedRectangle(loopBar, 2.0f, 1.0f);
+        g.setColour(palette.loopMarker); g.fillRoundedRectangle(loopBar, 2.0f);
+        g.setColour(palette.loopMarkerBorder); g.drawRoundedRectangle(loopBar, 2.0f, 1.0f);
         // Fade handles are separate from the boundary flags.
         const float inX = xForTime(state.loop.start + state.loop.fadeIn);
         const float outX = xForTime(state.loop.end - state.loop.fadeOut);
         g.saveState(); g.reduceClipRegion(area.toNearestInt());
-        g.setColour(palette.accent.withAlpha(0.8f));
+        g.setColour(palette.fade);
         g.drawLine(startX, area.getBottom(), inX, area.getY() + 22, 1.2f);
         g.drawLine(outX, area.getY() + 22, endX, area.getBottom(), 1.2f);
         g.fillRect(inX - 4, area.getY() + 18, 8.0f, 8.0f);
@@ -260,14 +272,14 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
     if (!editingStart && pendingSelection && selectionEnd != selectionStart)
     {
         const float a = xForTime(juce::jmin(selectionStart, selectionEnd)), b = xForTime(juce::jmax(selectionStart, selectionEnd));
-        g.setColour(juce::Colour(0x90548787));
+        g.setColour(palette.selection);
         g.fillRect(juce::Rectangle<float>(a, area.getY(), b - a, area.getHeight()).getIntersection(area));
     }
     // Musical labels overlay the waveform, never the scrollbar strip.
     const double signatureBeat = beatSeconds * 4.0 / processor.getProjectTimeSignatureDenominator();
     const int labelStride = juce::jmax(1, static_cast<int>(std::ceil(48.0 / juce::jmax(0.0001, signatureBeat / visibleLength() * area.getWidth()))));
     const double labelStep = signatureBeat * labelStride;
-    g.setColour(juce::Colour(0xff8b989a)); g.setFont(11.0f);
+    g.setColour(palette.gridText); g.setFont(11.0f);
     for (double t = std::floor(viewStart / labelStep) * labelStep; t <= viewStart + visibleLength(); t += labelStep)
     {
         const float x = xForTime(t);
@@ -285,34 +297,35 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         const auto& slot = state.slots[i];
         const float a = xForTime(slot.start), b = xForTime(slot.end);
         const auto line = juce::Rectangle<float>(a, area.getBottom() - 4.0f, b - a, 3.0f).getIntersection(area);
-        g.setColour(juce::Colour(0xffe07a5f)); g.fillRect(line);
+        g.setColour(palette.slot); g.fillRect(line);
         if (line.getWidth() > 0)
         {
-            g.setColour(juce::Colour(0xffe07a5f)); g.setFont(16.0f);
-            g.drawText(juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), static_cast<int>(line.getX()) + 2, getHeight() - 39, 24, 18, juce::Justification::centredLeft);
+            g.setColour(palette.slotText); g.setFont(16.0f);
+            const auto label = juce::String(int(i)+1) + " " + MiniSamplerAudioProcessor::noteLabel(juce::jmin(127,state.rootNote+int(i)));
+            g.drawText(label, static_cast<int>(line.getX()) + 2, getHeight() - 39, juce::jmin(90,int(line.getWidth())-2), 18, juce::Justification::centredLeft);
         }
     }
     if (!editingStart && cursor >= viewStart && cursor <= viewStart + visibleLength())
     {
-        g.setColour(juce::Colour(0xff66cecd)); g.drawLine(xForTime(cursor), area.getY(), xForTime(cursor), area.getBottom(), 2.0f);
+        g.setColour(palette.cursor); g.drawLine(xForTime(cursor), area.getY(), xForTime(cursor), area.getBottom(), 2.0f);
     }
     if (editingStart)
     {
         const float x = xForTime(draftStart);
-        g.setColour(palette.accent); g.drawLine(x, area.getY(), x, area.getBottom(), 2.0f);
+        g.setColour(palette.start); g.drawLine(x, area.getY(), x, area.getBottom(), 2.0f);
         juce::Path flag; flag.addTriangle(x, area.getY(), x + 11, area.getY(), x, area.getY() + 11); g.fillPath(flag);
     }
     const auto track = juce::Rectangle<float>(4.0f, 0.0f, getWidth() - 8.0f, area.getY());
     const float thumbWidth = juce::jmax(18.0f, track.getWidth() / static_cast<float>(zoom));
     const float thumbX = track.getX() + static_cast<float>(viewStart / juce::jmax(1.0e-9, duration() - visibleLength())) * (track.getWidth() - thumbWidth);
-    g.setColour(juce::Colour(0xff303234)); g.fillRoundedRectangle(track, 3.0f);
-    g.setColour(juce::Colour(dragMode == 6 ? 0xff686a6c : 0xff484a4c));
+    g.setColour(palette.scrollTrack); g.fillRoundedRectangle(track, 3.0f);
+    g.setColour(dragMode == 6 ? palette.scrollActive : palette.scrollThumb);
     g.fillRoundedRectangle({ thumbX, track.getY(), thumbWidth, track.getHeight() }, 3.0f);
     if (dragOver)
     {
-        g.setColour(juce::Colour(0x503dc6b3)); g.fillRect(area);
-        g.setColour(juce::Colour(0xff66ddc9)); g.drawRect(getLocalBounds(), 3);
-        g.setColour(juce::Colours::white); g.setFont(18.0f);
+        g.setColour(palette.dropFill); g.fillRect(area);
+        g.setColour(palette.dropBorder); g.drawRect(getLocalBounds(), 3);
+        g.setColour(palette.text); g.setFont(18.0f);
         g.drawText("Release to load sample", area, juce::Justification::centred);
     }
 }
@@ -429,6 +442,7 @@ void MiniSamplerWaveformView::mouseDrag(const juce::MouseEvent& event)
     }
     else if (dragMode == 4)
     {
+        setMouseCursor(juce::MouseCursor::UpDownLeftRightResizeCursor);
         const double len = dragLoopEnd - dragLoopStart;
         const double delta = (event.x - dragStart) / juce::jmax(1.0f, waveArea().getWidth()) * visibleLength() / (event.mods.isShiftDown() ? 10.0 : 1.0);
         const double start = juce::jlimit(0.0, juce::jmax(0.0, duration() - len), snapTime(dragLoopStart + delta));
@@ -456,7 +470,7 @@ void MiniSamplerWaveformView::mouseUp(const juce::MouseEvent& event)
         if (selectionEnd < selectionStart) std::swap(selectionStart, selectionEnd);
         if (selectionEnd - selectionStart < 0.001) pendingSelection = false;
     }
-    dragMode = 0; refresh(); repaint();
+    dragMode = 0; refresh(); mouseMove(event); repaint();
 }
 void MiniSamplerWaveformView::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
@@ -490,21 +504,11 @@ int MiniSamplerWaveformView::hitTestTool(float x, float y) const
 void MiniSamplerWaveformView::mouseMove(const juce::MouseEvent& e)
 {
     const int hit = hitTestTool(float(e.x), float(e.y));
-    static const juce::MouseCursor moveCursor = []
-    {
-        juce::Image image(juce::Image::ARGB, 24, 24, true); juce::Graphics g(image);
-        juce::Path path; path.startNewSubPath(3, 12); path.lineTo(21, 12);
-        path.startNewSubPath(12, 3); path.lineTo(12, 21);
-        path.addTriangle(0, 12, 5, 8, 5, 16); path.addTriangle(24, 12, 19, 8, 19, 16);
-        path.addTriangle(12, 0, 8, 5, 16, 5); path.addTriangle(12, 24, 8, 19, 16, 19);
-        g.setColour(juce::Colours::black); g.strokePath(path, juce::PathStrokeType(3));
-        g.setColour(juce::Colours::white); g.strokePath(path, juce::PathStrokeType(1)); g.fillPath(path);
-        return juce::MouseCursor(image, 12, 12);
-    }();
-    setMouseCursor(hit == 4 ? moveCursor :
+    // JUCE maps this standard cursor directly to IDC_SIZEALL on Windows.
+    setMouseCursor(hit == 4 ? juce::MouseCursor::UpDownLeftRightResizeCursor :
         (hit != 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor));
 }
-void MiniSamplerWaveformView::mouseExit(const juce::MouseEvent&) { setMouseCursor(juce::MouseCursor::NormalCursor); }
+void MiniSamplerWaveformView::mouseExit(const juce::MouseEvent&) { if (dragMode == 0) setMouseCursor(juce::MouseCursor::NormalCursor); }
 void MiniSamplerWaveformView::toggleStart()
 {
     refresh();
@@ -518,12 +522,16 @@ void MiniSamplerWaveformView::resetZoom() { zoom = 1.0; viewStart = 0.0; dirtyCa
 MiniSamplerAudioProcessorEditor::MiniSamplerAudioProcessorEditor(MiniSamplerAudioProcessor& p) : AudioProcessorEditor(&p), processor(p), waveform(p)
 {
     state = processor.getViewState();
+    lookAndFeel.apply(state.palette); setLookAndFeel(&lookAndFeel);
     setOpaque(true); setWantsKeyboardFocus(true); setResizable(true, true); setResizeLimits(900, 260, 1800, 1100);
     addAndMakeVisible(waveform);
     waveform.onChanged = [this] { state = processor.getViewState(); layoutTools(); repaint(); };
     setSize(juce::jmax(900, state.width), state.height); startTimerHz(15);
 }
-MiniSamplerAudioProcessorEditor::~MiniSamplerAudioProcessorEditor() { stopTimer(); }
+MiniSamplerAudioProcessorEditor::~MiniSamplerAudioProcessorEditor()
+{
+    stopTimer(); waveform.onChanged = {}; controlPanel.reset(); fileChooser.reset(); setLookAndFeel(nullptr);
+}
 void MiniSamplerAudioProcessorEditor::layoutTools()
 {
     tools.clear();
@@ -542,24 +550,25 @@ void MiniSamplerAudioProcessorEditor::layoutTools()
     put(snap, "Snap", x, 42, state.snap); x += 46;
     put(grid, divisions[state.grid - 1] + (state.triplet ? "T" : ""), x, 49); x += 53;
     put(zc, "ZC", x, 28, state.zeroCross); x += 32;
-    put(play, processor.isLooping() ? "Stop" : "Loop", x, 40, processor.isLooping()); x += 44;
+    put(play, "Loop", x, 40, processor.isLooping()); x += 44;
     put(settings, juce::String::charToString(0x2699), x, 27);
 }
 void MiniSamplerAudioProcessorEditor::resized()
 {
     waveform.setBounds(4, 28, getWidth() - 8, juce::jmax(10, getHeight() - 32));
     layoutTools(); processor.setEditorSize(getWidth(), getHeight());
+    if (controlPanel) controlPanel->setBounds(getWidth()-juce::jmin(580,getWidth()-16)-8,32,juce::jmin(580,getWidth()-16),juce::jmin(420,getHeight()-40));
 }
 void MiniSamplerAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    const auto palette = loopXPalette(state.theme);
+    const auto palette = state.palette;
     g.fillAll(palette.toolbar); g.setFont(12.0f);
     for (const auto& tool : tools)
     {
         g.setFont(tool.id >= 100 ? 15.0f : 12.0f);
-        g.setColour(tool.active ? palette.active : palette.button); g.fillRoundedRectangle(tool.rect.toFloat(), 2.0f);
-        g.setColour(tool.active ? palette.accent : palette.text.withAlpha(0.4f)); g.drawRoundedRectangle(tool.rect.toFloat(), 2.0f, 1.0f);
-        g.setColour(palette.text); g.drawText(tool.text, tool.rect, juce::Justification::centred);
+        g.setColour(tool.active ? palette.active : tool.id == hoveredTool ? palette.buttonHover : palette.button); g.fillRoundedRectangle(tool.rect.toFloat(), 2.0f);
+        g.setColour(tool.active ? palette.activeBorder : palette.buttonBorder); g.drawRoundedRectangle(tool.rect.toFloat(), 2.0f, 1.0f);
+        g.setColour(tool.active ? palette.activeText : palette.text); g.drawText(tool.text, tool.rect, juce::Justification::centred);
     }
 }
 void MiniSamplerAudioProcessorEditor::timerCallback()
@@ -568,8 +577,8 @@ void MiniSamplerAudioProcessorEditor::timerCallback()
     state = processor.getViewState();
     if (previous.slots.size() != state.slots.size() || previous.loop.start != state.loop.start || previous.loop.end != state.loop.end
         || previous.grid != state.grid || previous.segments != state.segments || previous.snap != state.snap || previous.zeroCross != state.zeroCross
-        || previous.theme != state.theme || previous.stretchApplied != state.stretchApplied || previous.triplet != state.triplet || lastPlaying != processor.isLooping())
-    { layoutTools(); repaint(0, 0, getWidth(), 28); }
+        || previous.palette != state.palette || previous.stretchApplied != state.stretchApplied || previous.triplet != state.triplet || lastPlaying != processor.isLooping())
+    { lookAndFeel.apply(state.palette); layoutTools(); repaint(); }
     if (lastTempo != processor.getTimelineTempo()) waveform.repaint();
     lastTempo = processor.getTimelineTempo(); lastPlaying = processor.isLooping();
 }
@@ -597,7 +606,7 @@ void MiniSamplerAudioProcessorEditor::invoke(int id, bool rightClick)
     else if (id == half) waveform.scaleLength(0.5);
     else if (id == snap || id == zc)
         processor.setUiSettings(state.grid, state.segments, id == snap ? !state.snap : state.snap, state.triplet, id == zc ? !state.zeroCross : state.zeroCross);
-    else if (id == play) { if (processor.isLooping()) processor.stopLoop(); else waveform.applySelection(); }
+    else if (id == play) processor.setLoopEnabled(!processor.isLooping());
     else menuFor(id);
     state = processor.getViewState(); layoutTools(); waveform.refreshFromProcessor(); repaint();
 }
@@ -621,13 +630,22 @@ void MiniSamplerAudioProcessorEditor::menuFor(int id)
         midi.addItem(30, "Velocity: Off", true, state.velocityMode == 0);
         midi.addItem(31, "Velocity -> Slot", true, state.velocityMode == 1);
         midi.addItem(32, "Velocity -> Loop Position", true, state.velocityMode == 2);
+        midi.addSeparator();
+        midi.addItem(60,"MIDI Note: Off",true,state.noteMode==0);
+        midi.addItem(61,"MIDI Note -> Slot",true,state.noteMode==1);
+        midi.addItem(62,"MIDI Note -> Loop Position",true,state.noteMode==2);
+        midi.addItem(63,"Note mapping... (Slot 1: " + MiniSamplerAudioProcessor::noteLabel(state.rootNote) + ")");
         display.addItem(2, "Stereo waveform", true, state.stereoWaveform);
         display.addItem(3, "Bright Grid", true, state.brightGrid);
-        const juce::StringArray names {"Default", "Graphite", "Coral", "Violet", "Amber"};
-        for (int i = 0; i < names.size(); ++i) themes.addItem(40 + i, names[i], true, state.theme == i);
+        const juce::StringArray names {"Studio Dark", "Graphite", "Slate", "Warm Gray", "Studio Light"};
+        for (int i = 0; i < names.size(); ++i) themes.addItem(40 + i, names[i], true, !state.customTheme && state.theme == i);
+        themes.addSeparator(); int themeIndex=0;
+        for (const auto& t : state.userThemes) themes.addItem(200+themeIndex++,t["name"].toString(),true,state.customTheme && state.themeName==t["name"].toString());
+        themes.addItem(51,"Theme editor / Import / Export...");
         menu.addSubMenu("Playback", playback); menu.addSubMenu("MIDI", midi);
         menu.addSubMenu("Display", display); menu.addSubMenu("Themes", themes);
         menu.addSeparator(); menu.addItem(50, "Load audio file...");
+        menu.addItem(64,"Loop Position (automation)...");
     }
     juce::Component::SafePointer<MiniSamplerAudioProcessorEditor> safe(this);
     menu.showMenuAsync(miniSamplerMenuOptions(*this, menuPosition), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
@@ -648,6 +666,9 @@ void MiniSamplerAudioProcessorEditor::handleMenu(int id, int result)
         if (result >= 30 && result <= 32) processor.setPlaybackSettings(state.playbackMode, result - 30);
         if (result >= 40 && result <= 44) processor.setTheme(result - 40);
         if (result == 50) chooseFile();
+        if (result == 51 || result == 63 || result == 64) showControlPanel(result);
+        if (result >= 60 && result <= 62) processor.setNoteSettings(result-60,state.rootNote);
+        if (result >= 200 && result < 264) processor.loadUserTheme(result-200);
     }
     state = processor.getViewState(); layoutTools(); waveform.refreshFromProcessor(); repaint();
 }
@@ -689,10 +710,10 @@ bool MiniSamplerAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 void MiniSamplerAudioProcessorEditor::mouseMove(const juce::MouseEvent& e)
 {
     for (const auto& t : tools) if (t.rect.contains(e.getPosition()))
-    { setMouseCursor(juce::MouseCursor::PointingHandCursor); return; }
-    setMouseCursor(juce::MouseCursor::NormalCursor);
+    { if (hoveredTool != t.id) { hoveredTool=t.id; repaint(0,0,getWidth(),28); } setMouseCursor(juce::MouseCursor::PointingHandCursor); return; }
+    if (hoveredTool!=0) { hoveredTool=0; repaint(0,0,getWidth(),28); } setMouseCursor(juce::MouseCursor::NormalCursor);
 }
-void MiniSamplerAudioProcessorEditor::mouseExit(const juce::MouseEvent&) { setMouseCursor(juce::MouseCursor::NormalCursor); }
+void MiniSamplerAudioProcessorEditor::mouseExit(const juce::MouseEvent&) { hoveredTool=0; repaint(0,0,getWidth(),28); setMouseCursor(juce::MouseCursor::NormalCursor); }
 
 namespace {
 class BpmPanel final : public juce::Component, private juce::Timer
@@ -709,13 +730,15 @@ public:
             if (!processor.matchBpm(original.getText().getDoubleValue()))
                 target.setText("Load audio / enter BPM 20-400", juce::dontSendNotification);
         };
+        addAndMakeVisible(done); done.setButtonText("Done"); done.onClick=[this]{setVisible(false);};
         setSize(256, 138); startTimerHz(10); timerCallback();
     }
     void resized() override
     {
         title.setBounds(12, 8, 232, 22); original.setBounds(12, 32, 232, 24);
-        target.setBounds(12, 60, 232, 24); match.setBounds(12, 94, 232, 28);
+        target.setBounds(12, 60, getWidth()-24, 24); match.setBounds(12, 94, getWidth()-108, 28); done.setBounds(getWidth()-84,94,72,28);
     }
+    void paint(juce::Graphics& g) override { g.fillAll(processor.getViewState().palette.toolbar); }
 private:
     void timerCallback() override
     {
@@ -723,11 +746,86 @@ private:
             (processor.isLoading() ? " (rendering)" : ""), juce::dontSendNotification);
     }
     MiniSamplerAudioProcessor& processor;
-    juce::TextEditor original; juce::Label target, title; juce::TextButton match;
+    juce::TextEditor original; juce::Label target, title; juce::TextButton match,done;
+};
+
+class NoteMappingPanel final : public juce::Component
+{
+public:
+    explicit NoteMappingPanel(MiniSamplerAudioProcessor& p) : processor(p)
+    {
+        for (auto* c : std::initializer_list<juce::Component*>{&mode,&root,&description,&done}) addAndMakeVisible(c);
+        mode.addItem("Notes: Off",1); mode.addItem("Note -> Slot",2); mode.addItem("Note -> Loop Position",3);
+        const auto s=p.getViewState(); mode.setSelectedId(s.noteMode+1,juce::dontSendNotification);
+        root.setRange(0,118,1); root.setValue(s.rootNote,juce::dontSendNotification); root.setTextBoxStyle(juce::Slider::TextBoxRight,false,60,22);
+        root.setTooltip("Root MIDI note for Slot 1. Next nine semitones = Slots 2-10. C3 = MIDI 60 in LoopX labels.");
+        mode.onChange=[this] { apply(); };
+        root.onValueChange=[this]{apply();};
+        done.setButtonText("Done"); done.onClick=[this]{setVisible(false);}; updateDescription();
+    }
+    void paint(juce::Graphics& g) override
+    {
+        const auto p=processor.getViewState().palette; g.fillAll(p.toolbar); g.setColour(p.text); g.setFont(12);
+        g.drawText("Slot 1 note",12,42,90,24,juce::Justification::centredLeft);
+    }
+    void resized() override
+    {
+        mode.setBounds(12,10,getWidth()-100,24); done.setBounds(getWidth()-80,10,68,24);
+        root.setBounds(110,42,getWidth()-122,24);
+        description.setBounds(12,76,getWidth()-24,getHeight()-86);
+    }
+private:
+    void apply() { processor.setNoteSettings(mode.getSelectedId()-1,int(root.getValue())); updateDescription(); repaint(); }
+    void updateDescription()
+    {
+        const auto s=processor.getViewState(); juce::String text;
+        root.setEnabled(s.noteMode!=2);
+        if (s.noteMode==2) text="128 notes = 128 divisions. MIDI 0 -> Grid 1, MIDI 1 -> Grid 2, ... MIDI 127 -> Grid 128.\nLoop length and pitch stay unchanged. No banks. Position is clamped at the sample end.\nNote names are exported to supported DAWs; octave labels differ between hosts.";
+        else
+        {
+            const int low[] {1,14,27,40,52,65,78,90,103,116}, high[] {13,26,39,51,64,77,89,102,115,127};
+            for (int i=0;i<10;++i) text+="Slot "+juce::String(i+1)+" : "+(s.rootNote+i<=127 ? MiniSamplerAudioProcessor::noteLabel(s.rootNote+i) : "unmapped")+
+                "    velocity "+juce::String(low[i])+"-"+juce::String(high[i])+"\n";
+        }
+        description.setText(text,juce::dontSendNotification);
+    }
+    MiniSamplerAudioProcessor& processor; juce::ComboBox mode; juce::Slider root; juce::Label description; juce::TextButton done;
+};
+class PositionPanel final : public juce::Component, private juce::Timer
+{
+public:
+    explicit PositionPanel(MiniSamplerAudioProcessor& p) : processor(p)
+    {
+        addAndMakeVisible(position); addAndMakeVisible(label); addAndMakeVisible(done);
+        position.setRange(0,100,0.01); position.setTextValueSuffix(" %"); position.setTextBoxStyle(juce::Slider::TextBoxRight,false,90,24);
+        position.setValue(p.positionParameter->get()*100,juce::dontSendNotification);
+        position.onDragStart=[this]{gesture=true; processor.positionParameter->beginChangeGesture();};
+        position.onDragEnd=[this]{processor.positionParameter->endChangeGesture(); gesture=false;};
+        position.onValueChange=[this]
+        {
+            if (!gesture) processor.positionParameter->beginChangeGesture();
+            processor.positionParameter->setValueNotifyingHost(float(position.getValue()/100));
+            if (!gesture) processor.positionParameter->endChangeGesture();
+        };
+        label.setText("Loop Position — automate this VST3 parameter in your DAW.\n0% = beginning; 100% = last valid start. Snap follows Grid.",juce::dontSendNotification);
+        done.setButtonText("Done"); done.onClick=[this]{setVisible(false);}; startTimerHz(15);
+    }
+    ~PositionPanel() override { stopTimer(); if (gesture) processor.positionParameter->endChangeGesture(); }
+    void paint(juce::Graphics& g) override { g.fillAll(processor.getViewState().palette.toolbar); }
+    void resized() override { label.setBounds(12,8,getWidth()-24,60); position.setBounds(12,76,getWidth()-24,32); done.setBounds(getWidth()-84,120,72,24); }
+private:
+    void timerCallback() override { if (!gesture) position.setValue(processor.positionParameter->get()*100,juce::dontSendNotification); }
+    MiniSamplerAudioProcessor& processor; juce::Slider position; juce::Label label; juce::TextButton done; bool gesture=false;
 };
 }
 void MiniSamplerAudioProcessorEditor::showBpm()
 {
-    const auto local = getLocalPoint(nullptr, menuPosition);
-    juce::CallOutBox::launchAsynchronously(std::make_unique<BpmPanel>(processor), {local.x, local.y, 1, 1}, this);
+    controlPanel = std::make_unique<BpmPanel>(processor); addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
+}
+void MiniSamplerAudioProcessorEditor::showControlPanel(int type)
+{
+    if (type==51) controlPanel=std::make_unique<LoopXThemeEditor>(processor);
+    else if (type==63) controlPanel=std::make_unique<NoteMappingPanel>(processor);
+    else controlPanel=std::make_unique<PositionPanel>(processor);
+    addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
 }
