@@ -24,6 +24,7 @@ private:
 
     MiniSamplerAudioProcessor& processor;
     juce::TextButton loadButton { "Load sample..." };
+    juce::ComboBox gridDivisionBox;
     juce::Label sampleLabel;
     juce::MidiKeyboardComponent keyboard;
     std::unique_ptr<juce::FileChooser> fileChooser;
