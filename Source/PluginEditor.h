@@ -1,5 +1,6 @@
 #pragma once
 #include "PluginProcessor.h"
+#include "ThemeEditor.h"
 
 inline juce::PopupMenu::Options miniSamplerMenuOptions(juce::Component& editor, juce::Point<int> screenPoint)
 {
@@ -99,6 +100,7 @@ private:
     void invoke(int, bool rightClick);
     void chooseFile();
     void showBpm();
+    void showControlPanel(int);
     void menuFor(int);
     void handleMenu(int tool, int result);
     MiniSamplerAudioProcessor& processor;
@@ -106,6 +108,9 @@ private:
     MiniSamplerAudioProcessor::ViewState state;
     std::vector<Tool> tools;
     std::unique_ptr<juce::FileChooser> fileChooser;
+    LoopXLookAndFeel lookAndFeel;
+    std::unique_ptr<juce::Component> controlPanel;
+    int hoveredTool = 0;
     double lastTempo = 120.0;
     bool lastPlaying = false;
     juce::Point<int> menuPosition;
