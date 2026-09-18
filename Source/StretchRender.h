@@ -15,5 +15,6 @@ inline std::shared_ptr<MiniSamplerSample> renderBpmSample(const MiniSamplerSampl
     if (!stretchAudio(original.audio.getArrayOfReadPointers(), original.audio.getNumChannels(),
                       original.audio.getNumSamples(), original.rate, first, int(wanted),
                       result->audio.getArrayOfWritePointers(), ratio, cancelled)) return {};
-    result->buildWaveform(); return result;
+    if (!result->buildWaveform(cancelled)) return {};
+    return result;
 }
