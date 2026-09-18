@@ -9,7 +9,64 @@ struct MiniSamplerSample
     juce::AudioBuffer<float> audio;
     double rate = 44100.0;
     juce::File file;
-    std::array<std::vector<std::pair<float, float>>, 2> peaks;
+    struct PeakLevel { int64_t stride = 64; std::vector<std::pair<float, float>> values; };
+    std::array<std::vector<PeakLevel>, 2> peaks;
+    void buildWaveform()
+    {
+        for (int ch = 0; ch < audio.getNumChannels(); ++ch)
+        {
+            auto& levels = peaks[static_cast<size_t>(ch)];
+            PeakLevel base;
+            const auto* data = audio.getReadPointer(ch);
+            for (int64_t a = 0; a < audio.getNumSamples(); a += 64)
+            {
+                float low = data[a], high = low;
+                for (int64_t i = a + 1; i < juce::jmin<int64_t>(a + 64, audio.getNumSamples()); ++i)
+                { low = juce::jmin(low, data[i]); high = juce::jmax(high, data[i]); }
+                base.values.emplace_back(low, high);
+            }
+            levels.push_back(std::move(base));
+            while (levels.back().values.size() > 1)
+            {
+                const auto& previous = levels.back();
+                PeakLevel next; next.stride = previous.stride * 4;
+                for (size_t a = 0; a < previous.values.size(); a += 4)
+                {
+                    auto range = previous.values[a];
+                    for (size_t i = a + 1; i < juce::jmin(a + 4, previous.values.size()); ++i)
+                    { range.first = juce::jmin(range.first, previous.values[i].first); range.second = juce::jmax(range.second, previous.values[i].second); }
+                    next.values.push_back(range);
+                }
+                levels.push_back(std::move(next));
+            }
+        }
+    }
+    std::pair<float, float> waveformRange(int channel, int first, int last) const
+    {
+        first = juce::jlimit(0, audio.getNumSamples() - 1, first);
+        last = juce::jlimit(first + 1, audio.getNumSamples(), last);
+        const auto* data = audio.getReadPointer(channel);
+        std::pair<float, float> range { data[first], data[first] };
+        // Exact original extrema: cached blocks are used ONLY when wholly
+        // inside this pixel's source interval. Read unaligned edges verbatim.
+        while (first < last)
+        {
+            const PeakLevel* level = nullptr;
+            for (const auto& candidate : peaks[static_cast<size_t>(channel)])
+                if (first % candidate.stride == 0 && candidate.stride <= last - first) level = &candidate;
+            if (level)
+            {
+                const auto value = level->values[static_cast<size_t>(first / level->stride)];
+                range.first = juce::jmin(range.first, value.first); range.second = juce::jmax(range.second, value.second);
+                first += static_cast<int>(level->stride);
+            }
+            else
+            {
+                range.first = juce::jmin(range.first, data[first]); range.second = juce::jmax(range.second, data[first]); ++first;
+            }
+        }
+        return range;
+    }
     double duration() const { return audio.getNumSamples() / rate; }
 };
 
