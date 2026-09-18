@@ -370,10 +370,11 @@ int main()
         p.setUiSettings(6,4,false,false,true); p.setDisplaySettings(true,true); p.setNoteSettings(1,48);
         juce::MemoryBlock completeState; p.getStateInformation(completeState);
         MiniSamplerAudioProcessor fresh(juce::File{}); fresh.setTheme(4); fresh.setUiSettings(1,1,true,false,false);
-        StateQueryHost restoreHost; fresh.addListener(&restoreHost);
+        auto& freshHostInterface = static_cast<juce::AudioProcessor&>(fresh);
+        StateQueryHost restoreHost; freshHostInterface.addListener(&restoreHost);
         fresh.setStateInformation(completeState.getData(),int(completeState.getSize()));
         check(restoreHost.changes==0,"state restore does not synchronously notify host under state lock");
-        fresh.removeListener(&restoreHost); waitForLoad(fresh);
+        freshHostInterface.removeListener(&restoreHost); waitForLoad(fresh);
         const auto complete=fresh.getViewState();
         check(complete.palette==palette && complete.customTheme && complete.themeName=="Renamed Studio" && complete.grid==6 && complete.segments==4 &&
               !complete.snap && complete.zeroCross && complete.brightGrid && complete.stereoWaveform && complete.noteMode==1 && complete.rootNote==48,
@@ -392,10 +393,10 @@ int main()
           check(s.grid==6 && s.segments==4 && !s.snap && s.zeroCross && s.palette==palette && s.themeName=="Persistent",
                 "plugin deletion / new instance restores last-used theme and grid from preferences"); }
         prefs.deleteFile();
-        StateQueryHost queried; fresh.addListener(&queried);
+        StateQueryHost queried; freshHostInterface.addListener(&queried);
         fresh.setTheme(1); fresh.setUiSettings(2,2,true,false,false); fresh.setLoopSelection(0,0.5,1);
         juce::MessageManager::getInstance()->runDispatchLoopUntil(80);
-        check(queried.changes>0,"host state queries during notifications do not deadlock loader / UI"); fresh.removeListener(&queried);
+        check(queried.changes>0,"host state queries during notifications do not deadlock loader / UI"); freshHostInterface.removeListener(&queried);
 
         const auto shutdownStart=juce::Time::getMillisecondCounterHiRes();
         for(int n=0;n<12;++n)
