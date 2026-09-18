@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
 #include <limits>
 
 MiniSamplerAudioProcessor::MiniSamplerAudioProcessor()
@@ -137,11 +138,11 @@ void MiniSamplerAudioProcessor::run()
     juce::AudioFormatManager formats; formats.registerBasicFormats();
     while (!threadShouldExit())
     {
-        juce::File file; bool restoring = false; uint64_t version;
+        juce::File file; uint64_t version;
         {
             const juce::ScopedLock lock(stateLock);
             version = requestVersion;
-            if (version != handled) { file = pendingFile; restoring = pendingRestore; }
+            if (version != handled) file = pendingFile;
         }
         if (version != handled)
         {
@@ -168,12 +169,15 @@ void MiniSamplerAudioProcessor::run()
                     {
                         if (state.sample) retired.push_back(state.sample);
                         state.sample = sample; audioSample.store(sample.get(), std::memory_order_seq_cst);
-                        if (!restoring) { state.slots.clear(); loopEnabled.store(false); state.loop = {}; }
-                        else
+                        state.loop.start = juce::jlimit(0.0, sample->duration(), state.loop.start);
+                        state.loop.end = juce::jlimit(state.loop.start, sample->duration(), state.loop.end);
+                        state.slots.erase(std::remove_if(state.slots.begin(), state.slots.end(), [duration = sample->duration()](Loop& loop)
                         {
-                            state.loop.start = juce::jlimit(0.0, sample->duration(), state.loop.start);
-                            state.loop.end = juce::jlimit(state.loop.start, sample->duration(), state.loop.end);
-                        }
+                            loop.start = juce::jlimit(0.0, duration, loop.start);
+                            loop.end = juce::jlimit(loop.start, duration, loop.end);
+                            return loop.end - loop.start < 0.001;
+                        }), state.slots.end());
+                        if (state.loop.end - state.loop.start < 0.001) loopEnabled.store(false);
                         publishLoop(state.loop); state.status = file.getFileName();
                     }
                     else state.status = error;
@@ -278,7 +282,7 @@ void MiniSamplerAudioProcessor::setStateInformation(const void* data, int size)
     state.grid = juce::jlimit(1, 6, xml->getIntAttribute("grid", 3)); state.segments = juce::jlimit(1, 5, xml->getIntAttribute("segments", 1));
     state.snap = xml->getBoolAttribute("snap", true); state.triplet = xml->getBoolAttribute("triplet"); state.zeroCross = xml->getBoolAttribute("zeroCross");
     state.midiKeyTracking = xml->getBoolAttribute("midiKeyTracking", false); midiKeyTracking.store(state.midiKeyTracking);
-    state.brightGrid = xml->getBoolAttribute("brightGrid", true); state.stereoWaveform = xml->getBoolAttribute("stereoWaveform", false);
+    state.brightGrid = xml->getBoolAttribute("brightGrid", false); state.stereoWaveform = xml->getBoolAttribute("stereoWaveform", false);
     state.width = juce::jlimit(720, 1800, xml->getIntAttribute("width", 1000)); state.height = juce::jlimit(260, 1100, xml->getIntAttribute("height", 390));
     publishLoop(state.loop); loopEnabled.store(xml->getBoolAttribute("enabled"));
     const juce::File file(xml->getStringAttribute("file"));
