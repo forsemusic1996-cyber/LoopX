@@ -1,6 +1,13 @@
 #pragma once
 #include "PluginProcessor.h"
 
+inline juce::PopupMenu::Options miniSamplerMenuOptions(juce::Component& editor, juce::Point<int> screenPoint)
+{
+    return juce::PopupMenu::Options().withTargetComponent(&editor)
+        .withTargetScreenArea({ screenPoint.x, screenPoint.y, 1, 1 })
+        .withParentComponent(&editor).withStandardItemHeight(22);
+}
+
 class MiniSamplerWaveformView final : public juce::Component,
                                      public juce::FileDragAndDropTarget,
                                      public juce::TextDragAndDropTarget,
@@ -28,7 +35,8 @@ public:
     void scaleLength(double factor);
     void moveLoop(double seconds);
     void resetZoom();
-    bool stereo = true;
+    void refreshFromProcessor() { refresh(); repaint(); }
+    bool stereo = false;
     bool brightGrid = true;
     std::function<void()> onChanged;
 private:
@@ -89,5 +97,6 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     double lastTempo = 120.0;
     bool lastPlaying = false;
+    juce::Point<int> menuPosition;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerAudioProcessorEditor)
 };
