@@ -17,9 +17,17 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Download JUCE
+      - name: Download pinned JUCE 9.0.2
         shell: pwsh
-        run: git clone --depth 1 https://github.com/juce-framework/JUCE.git JUCE
+        run: |
+          $juceCommit = "72782788ce18c2d4d760b28e0921d6ffc6431102"
+          New-Item -ItemType Directory -Path JUCE -Force | Out-Null
+          git -C JUCE init
+          git -C JUCE remote add origin https://github.com/juce-framework/JUCE.git
+          git -C JUCE fetch --depth 1 origin $juceCommit
+          git -C JUCE checkout --detach FETCH_HEAD
+          $actualCommit = (git -C JUCE rev-parse HEAD).Trim()
+          if ($actualCommit -ne $juceCommit) { throw "Unexpected JUCE commit: $actualCommit" }
 
       - name: Configure
         shell: pwsh
