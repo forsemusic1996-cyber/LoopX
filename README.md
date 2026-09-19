@@ -1,4 +1,5 @@
 # Mini Sampler / LoopX v0.4.1
+JUCE is reproducibly pinned to release 9.0.2, commit `72782788ce18c2d4d760b28e0921d6ffc6431102`; the cloud build does not use a JUCE installation from the developer PC.
 JUCE Windows x64 VST3 sampler, built and tested by GitHub Actions.
 
 ## Sample and BPM
