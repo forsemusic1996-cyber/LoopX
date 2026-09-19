@@ -18,7 +18,7 @@ endif()
 
 if(NOT JUCE_DIR OR NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
-        "JUCE was not found. Configure with -DJUCE_DIR=D:/CppLibrary/JUCE "
+        "JUCE was not found. Configure with -DJUCE_DIR=<path-to-JUCE> "
         "or place JUCE in the project/JUCE directory.")
 endif()
 
