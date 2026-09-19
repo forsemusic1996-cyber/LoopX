@@ -33,7 +33,11 @@ MiniSamplerWaveformView::MiniSamplerWaveformView(MiniSamplerAudioProcessor& p) :
 {
     setOpaque(true); refresh(); startTimerHz(30);
 }
-MiniSamplerWaveformView::~MiniSamplerWaveformView() { stopTimer(); }
+MiniSamplerWaveformView::~MiniSamplerWaveformView()
+{
+    stopTimer();
+    if (loopPositionGesture) processor.positionParameter->endChangeGesture();
+}
 const MiniSamplerSample* MiniSamplerWaveformView::drawingSample() const
 {
     return editingStart ? state.originalSample.get() : state.sample.get();
@@ -118,6 +122,7 @@ void MiniSamplerWaveformView::refresh()
             if (next.slots[i].start != state.slots[i].start || next.slots[i].end != state.slots[i].end)
             { overlaysChanged = true; break; }
     state = std::move(next);
+    if (state.segments > 1) pendingSelection = false;
     if (changed) { dirtyCache = true; viewStart = 0; zoom = 1; pendingSelection = false; dragMode = 0; }
     if (!pendingSelection && dragMode == 0) { selectionStart = state.loop.start; selectionEnd = state.loop.end; }
     if (changed || overlaysChanged || displayChanged) repaint();
@@ -337,7 +342,25 @@ void MiniSamplerWaveformView::commit(double start, double end, double beats)
 }
 void MiniSamplerWaveformView::applySelection()
 {
-    if (selectionEnd > selectionStart) commit(selectionStart, selectionEnd);
+    if (state.segments == 1 && pendingSelection && selectionEnd > selectionStart) commit(selectionStart, selectionEnd);
+}
+void MiniSamplerWaveformView::activateSegmentAt(float x)
+{
+    if (state.segments <= 1) return;
+    const double seconds = LoopMath::divisionBeats(1, processor.getProjectTimeSignatureNumerator(), processor.getProjectTimeSignatureDenominator())
+        / std::pow(2.0, state.segments - 2) * 60.0 / processor.getTimelineTempo();
+    const double start = std::floor(timeForX(x) / seconds) * seconds;
+    pendingSelection = false;
+    commit(start, juce::jmin(duration(), start + seconds));
+}
+void MiniSamplerWaveformView::setLoopPositionParameter(double start)
+{
+    const double length = dragLoopEnd - dragLoopStart;
+    const double lastStart = juce::jmax(0.0, duration() - length);
+    const float normalised = lastStart > 0 ? static_cast<float>(juce::jlimit(0.0, lastStart, start) / lastStart) : 0.0f;
+    processor.positionParameter->setValueNotifyingHost(normalised);
+    refresh();
+    if (onChanged) onChanged();
 }
 void MiniSamplerWaveformView::setMusicalLength(double beats)
 {
@@ -366,7 +389,7 @@ void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
     if (getParentComponent()) getParentComponent()->grabKeyboardFocus();
     if (event.mods.isRightButtonDown())
     {
-        juce::PopupMenu menu; menu.addItem(1, "SET selection as loop", selectionEnd > selectionStart); menu.addItem(2, "Save loop to slot", state.loop.end > state.loop.start && state.slots.size() < 10);
+        juce::PopupMenu menu; menu.addItem(1, "SET selection as loop", state.segments == 1 && pendingSelection && selectionEnd > selectionStart); menu.addItem(2, "Save loop to slot", state.loop.end > state.loop.start && state.slots.size() < 10);
         juce::Component::SafePointer<MiniSamplerWaveformView> safe(this);
         menu.showMenuAsync(miniSamplerMenuOptions(*getParentComponent(), event.getScreenPosition()), [safe](int result)
         { if (safe) { if (result == 1) safe->applySelection(); if (result == 2) { safe->processor.saveSlot(); if (safe->onChanged) safe->onChanged(); safe->refresh(); safe->repaint(); } } });
@@ -395,21 +418,24 @@ void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
     }
     const int hit = hitTestTool(float(event.x), float(event.y));
     if (hit == 8 || hit == 9) { dragMode = hit; return; }
+    if (hit == 4)
+    {
+        dragMode = 4; loopPositionGesture = true;
+        processor.positionParameter->beginChangeGesture();
+        setLoopPositionParameter(state.loop.start);
+        return;
+    }
     const bool loopValid = state.loop.end > state.loop.start;
-    if (event.y >= waveArea().getBottom() && event.y < getHeight() - 4 && loopValid && event.x >= xForTime(state.loop.start) && event.x <= xForTime(state.loop.end)) dragMode = 4;
-    else if (loopValid && std::abs(event.x - xForTime(state.loop.start)) <= 6) dragMode = 2;
+    if (loopValid && std::abs(event.x - xForTime(state.loop.start)) <= 6) dragMode = 2;
     else if (loopValid && std::abs(event.x - xForTime(state.loop.end)) <= 6) dragMode = 3;
+    else if (state.segments > 1)
+    {
+        dragMode = 7;
+        activateSegmentAt(float(event.x));
+    }
     else
     {
         dragMode = 1; pendingSelection = true; selectionStart = snapTime(timeForX(static_cast<float>(event.x))); selectionEnd = selectionStart;
-        if (state.segments > 1)
-        {
-            const double seconds = LoopMath::divisionBeats(1, processor.getProjectTimeSignatureNumerator(), processor.getProjectTimeSignatureDenominator())
-                / std::pow(2.0, state.segments - 2) * 60 / processor.getTimelineTempo();
-            const double start = std::floor(timeForX(float(event.x)) / seconds) * seconds;
-            commit(start, juce::jmin(duration(), start + seconds));
-            dragMode = 7;
-        }
     }
     repaint();
 }
@@ -427,11 +453,7 @@ void MiniSamplerWaveformView::mouseDrag(const juce::MouseEvent& event)
                                dragMode == 9 ? juce::jlimit(0.0, limit, state.loop.end - time) : state.loop.fadeOut);
         refresh();
     }
-    else if (dragMode == 7 && std::abs(event.x - dragStart) >= 4)
-    {
-        dragMode = 1; pendingSelection = true; selectionStart = snapTime(timeForX(float(dragStart)));
-        selectionEnd = snapTime(timeForX(float(event.x)));
-    }
+    else if (dragMode == 7) activateSegmentAt(float(event.x));
     else if (dragMode == 1) selectionEnd = snapTime(timeForX(static_cast<float>(event.x)));
     else if (dragMode == 2 || dragMode == 3)
     {
@@ -446,7 +468,7 @@ void MiniSamplerWaveformView::mouseDrag(const juce::MouseEvent& event)
         const double len = dragLoopEnd - dragLoopStart;
         const double delta = (event.x - dragStart) / juce::jmax(1.0f, waveArea().getWidth()) * visibleLength() / (event.mods.isShiftDown() ? 10.0 : 1.0);
         const double start = juce::jlimit(0.0, juce::jmax(0.0, duration() - len), snapTime(dragLoopStart + delta));
-        commit(start, start + len, state.loop.beats);
+        setLoopPositionParameter(start);
     }
     else if (dragMode == 5)
     {
@@ -465,12 +487,19 @@ void MiniSamplerWaveformView::mouseDrag(const juce::MouseEvent& event)
 void MiniSamplerWaveformView::mouseUp(const juce::MouseEvent& event)
 {
     juce::ignoreUnused(event);
+    const int completedMode = dragMode;
     if (dragMode == 1)
     {
         if (selectionEnd < selectionStart) std::swap(selectionStart, selectionEnd);
         if (selectionEnd - selectionStart < 0.001) pendingSelection = false;
     }
-    dragMode = 0; refresh(); mouseMove(event); repaint();
+    dragMode = 0;
+    if (completedMode == 4 && loopPositionGesture)
+    {
+        processor.positionParameter->endChangeGesture();
+        loopPositionGesture = false;
+    }
+    refresh(); mouseMove(event); repaint();
 }
 void MiniSamplerWaveformView::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
@@ -497,7 +526,10 @@ int MiniSamplerWaveformView::hitTestTool(float x, float y) const
         if (std::abs(x - xForTime(state.loop.start + state.loop.fadeIn)) <= 7) return 8;
         if (std::abs(x - xForTime(state.loop.end - state.loop.fadeOut)) <= 7) return 9;
     }
-    if (y >= area.getBottom() && x >= xForTime(state.loop.start) && x <= xForTime(state.loop.end)) return 4;
+    const auto loopBar = juce::Rectangle<float>(xForTime(state.loop.start), area.getBottom(),
+                                                xForTime(state.loop.end) - xForTime(state.loop.start), 14.0f)
+                             .getIntersection(getLocalBounds().toFloat());
+    if (loopBar.contains(x, y)) return 4;
     if (std::abs(x - xForTime(state.loop.start)) <= 6 || std::abs(x - xForTime(state.loop.end)) <= 6) return 2;
     return 0;
 }
@@ -557,7 +589,15 @@ void MiniSamplerAudioProcessorEditor::resized()
 {
     waveform.setBounds(4, 28, getWidth() - 8, juce::jmax(10, getHeight() - 32));
     layoutTools(); processor.setEditorSize(getWidth(), getHeight());
-    if (controlPanel) controlPanel->setBounds(getWidth()-juce::jmin(580,getWidth()-16)-8,32,juce::jmin(580,getWidth()-16),juce::jmin(420,getHeight()-40));
+    if (controlPanel)
+    {
+        if (compactControlPanel)
+            controlPanel->setBounds(juce::jlimit(8, getWidth() - 264, getWidth() - 332), 28,
+                                    juce::jmin(256, getWidth() - 16), juce::jmin(138, getHeight() - 32));
+        else
+            controlPanel->setBounds(getWidth()-juce::jmin(580,getWidth()-16)-8,32,
+                                    juce::jmin(580,getWidth()-16),juce::jmin(420,getHeight()-40));
+    }
 }
 void MiniSamplerAudioProcessorEditor::paint(juce::Graphics& g)
 {
@@ -820,10 +860,11 @@ private:
 }
 void MiniSamplerAudioProcessorEditor::showBpm()
 {
-    controlPanel = std::make_unique<BpmPanel>(processor); addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
+    compactControlPanel = true; controlPanel = std::make_unique<BpmPanel>(processor); addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
 }
 void MiniSamplerAudioProcessorEditor::showControlPanel(int type)
 {
+    compactControlPanel = false;
     if (type==51) controlPanel=std::make_unique<LoopXThemeEditor>(processor);
     else if (type==63) controlPanel=std::make_unique<NoteMappingPanel>(processor);
     else controlPanel=std::make_unique<PositionPanel>(processor);
