@@ -56,6 +56,8 @@ private:
     double duration() const;
     const MiniSamplerSample* drawingSample() const;
     int hitTestTool(float x, float y) const;
+    void activateSegmentAt(float x);
+    void setLoopPositionParameter(double start);
     double visibleLength() const;
     juce::Rectangle<float> waveArea() const;
     MiniSamplerAudioProcessor& processor;
@@ -66,6 +68,7 @@ private:
     double selectionStart = 0.0, selectionEnd = 0.0, cursor = -1.0;
     double dragStart = 0.0, dragLoopStart = 0.0, dragLoopEnd = 0.0, dragViewStart = 0.0;
     int dragMode = 0;
+    bool loopPositionGesture = false;
     bool editingStart = false;
     double draftStart = 0;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerWaveformView)
@@ -110,6 +113,7 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     LoopXLookAndFeel lookAndFeel;
     std::unique_ptr<juce::Component> controlPanel;
+    bool compactControlPanel = false;
     int hoveredTool = 0;
     double lastTempo = 120.0;
     bool lastPlaying = false;
