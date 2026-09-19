@@ -1,4 +1,4 @@
-# Mini Sampler / LoopX v0.4
+# Mini Sampler / LoopX v0.4.1
 JUCE Windows x64 VST3 sampler, built and tested by GitHub Actions.
 
 ## Sample and BPM
@@ -28,12 +28,13 @@ Note mappings take precedence over velocity mappings. Host Slot/Loop Position wr
 JUCE exports Slot/Grid note labels to hosts that support custom note names; DAW octave conventions differ. Channel-specific labels are not guaranteed by VST3 hosts.
 
 ## Editing and automation
-Drag a selection and press SET, or right-click to apply it. Segments activate on mouse down.
-Drag loop boundaries or the bottom loop handle. Drag the two upper fade handles to change independent fade-in/out.
+Drag a selection and press SET, or right-click to apply it. Segments activate immediately on mouse down/drag and disable ordinary Selection while that mode is active.
+Drag loop boundaries or the bottom loop handle. The bottom handle directly touches and writes the host-visible Loop Position parameter, so DAW Last Tweaked/automation recording works without opening Settings. Its four-arrow cursor and drag action share the exact same hit-zone.
+Drag the two upper fade handles to change independent fade-in/out.
 Mouse wheel zooms; Shift+wheel or middle-drag pans. Scrollbar is above waveform.
 + stores up to ten slots. Left-click recalls, right-click removes. Keys 1–9/0 recall.
 Host automation: Slot 0 = manual loop, 1–10 = saved slots; Loop Position = normalized sample position.
-Settings > Loop Position (automation) opens a host-linked slider. Move it to expose Last Tweaked/record automation in your host; choose the parameter named Loop Position for an envelope.
+Settings > Loop Position (automation) remains available as an alternative host-linked slider; choose the parameter named Loop Position for an envelope.
 Parameter IDs remain `slot` and `loopPosition` for compatibility with existing automation.
 Loop is a fixed-label on/off toggle; switching it off preserves the current region.
 Loop Position and velocity movement follow the chosen grid when Snap is enabled.
@@ -48,7 +49,7 @@ Five complete professional palettes: Studio Dark, Graphite, Slate, Warm Gray, St
 Settings > Themes > Theme editor: 33 separately editable RGBA colours, HSV colour selection, independent Selection/Loop alpha, live preview, user-theme save/rename, reset base, Cancel/Done, `.theme.json` import/export.
 The complete active palette and saved user-theme library are embedded in project state; external theme files are not needed to restore a project.
 Last-used grid/theme and UI settings also persist locally in the application-data `LoopX/settings.json`; project state takes precedence. Closing only the editor does not reset settings.
-Zoomed-out waveforms use a dimmer, anti-aliased envelope through the original pixel extrema. Audio is unchanged.
+The BPM button uses a compact 256 x 138 panel. Zoomed-out waveforms use a dimmer, anti-aliased envelope through the original pixel extrema. Audio is unchanged.
 The bottom Loop handle uses JUCE's standard four-direction cursor (Windows IDC_SIZEALL), including while dragging.
 Unload safety: bounded/chunked decode, cancellable waveform/render work, editor-owned control panels/timers, asynchronous non-parameter host notifications outside locks. Automated unload stress is not a substitute for a real FL Studio project test.
 
