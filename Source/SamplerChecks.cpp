@@ -40,6 +40,12 @@ struct StateQueryHost final : juce::AudioProcessorListener
     void audioProcessorParameterChanged(juce::AudioProcessor* p,int,float) override { query(p); }
     void audioProcessorChanged(juce::AudioProcessor* p,const ChangeDetails&) override { query(p); }
 };
+struct ParameterTouchSpy final : juce::AudioProcessorParameter::Listener
+{
+    int values = 0, starts = 0, ends = 0;
+    void parameterValueChanged(int, float) override { ++values; }
+    void parameterGestureChanged(int, bool starting) override { starting ? ++starts : ++ends; }
+};
 }
 
 int main()
@@ -97,6 +103,13 @@ int main()
             return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(), { x, y }, juce::ModifierKeys(modifiers),
                 1.0f, 0, 0, 0, 0, component, component, juce::Time::getCurrentTime(), { x, y }, juce::Time::getCurrentTime(), 1, dragging);
         };
+        editor->mouseDown(eventFor(editor.get(), float(editor->getWidth() - 312), 12, juce::ModifierKeys::leftButtonModifier));
+        juce::Component* bpmPanel = nullptr;
+        for (auto* child : editor->getChildren())
+            if (child != wave && child->isVisible() && child->getWidth() == 256 && child->getHeight() == 138) bpmPanel = child;
+        check(bpmPanel && bpmPanel->getWidth() <= 256 && bpmPanel->getHeight() <= 138,
+              "BPM button opens the compact panel instead of the large settings panel");
+        bpmPanel->setVisible(false);
         p.setLoopSelection(0.5, 1.0, 1); wave->refreshFromProcessor();
         const auto slotBaseline = wave->createComponentSnapshot(wave->getLocalBounds());
         check(wave->getBottom() == editor->getHeight() - 4, "waveform fills editor down to bottom margin with no footer");
@@ -225,7 +238,30 @@ int main()
         p.setUiSettings(3, 3, true, false, false); wave->refreshFromProcessor();
         wave->mouseDown(eventFor(wave, float(wave->getWidth()) * 0.75f, 110, juce::ModifierKeys::leftButtonModifier));
         check(p.getViewState().loop.start >= 1, "segment activates on mouse down without waiting for release");
+        wave->mouseDrag(eventFor(wave, float(wave->getWidth()) * 0.25f, 110, juce::ModifierKeys::leftButtonModifier, true));
         wave->mouseUp(eventFor(wave, float(wave->getWidth()) * 0.75f, 110, 0));
+        const auto draggedSegment = p.getViewState().loop;
+        wave->applySelection();
+        check(p.getViewState().loop.start == draggedSegment.start && p.getViewState().loop.end == draggedSegment.end,
+              "Segments mode disables ordinary selection even while dragging");
+
+        p.setLoopSelection(0.2,0.7,1); p.setUiSettings(5,1,false,false,false); wave->refreshFromProcessor();
+        ParameterTouchSpy touchSpy; p.positionParameter->addListener(&touchSpy);
+        const float markerX = 4.0f + float(0.45 / 2.0) * (wave->getWidth() - 8);
+        const float markerY = float(wave->getHeight() - 5);
+        wave->mouseMove(eventFor(wave, markerX, markerY, 0));
+        check(wave->getMouseCursor() == juce::MouseCursor::UpDownLeftRightResizeCursor,
+              "four-arrow cursor is restricted to the real lower Loop marker hit-zone");
+        wave->mouseDown(eventFor(wave, markerX, markerY, juce::ModifierKeys::leftButtonModifier));
+        wave->mouseDrag(eventFor(wave, markerX + 80, markerY, juce::ModifierKeys::leftButtonModifier, true));
+        wave->mouseUp(eventFor(wave, markerX + 80, markerY, 0, true));
+        p.positionParameter->removeListener(&touchSpy);
+        check(touchSpy.starts == 1 && touchSpy.ends == 1 && touchSpy.values > 0 && p.positionParameter->get() > 0.13f,
+              "dragging the lower Loop marker performs one host automation gesture for Loop Position");
+        const auto automatedLoop = p.getViewState().loop;
+        wave->applySelection();
+        check(p.getViewState().loop.start == automatedLoop.start,
+              "lower Loop marker drag never falls through into Selection in normal mode");
         p.setLoopSelection(0.2, 0.7, 1);
         p.setUiSettings(5, 1, true, false, false); p.prepareToPlay(48000, 256);
         p.positionParameter->setValueNotifyingHost(0.37f); midi.clear();
