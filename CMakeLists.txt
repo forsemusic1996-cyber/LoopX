@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MiniSampler VERSION 0.4.1)
+project(LoopX VERSION 0.4.1)
 
 if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -35,31 +35,32 @@ FetchContent_MakeAvailable(signalsmith_stretch)
 add_library(signalsmith_stretch_headers INTERFACE)
 target_include_directories(signalsmith_stretch_headers INTERFACE ${signalsmith_stretch_SOURCE_DIR})
 
-juce_add_plugin(MiniSampler
+juce_add_plugin(LoopX
     COMPANY_NAME "Codex Test"
-    BUNDLE_ID "com.forsemusic.MiniSampler"
+    BUNDLE_ID "com.forsemusic.LoopX"
     PLUGIN_MANUFACTURER_CODE CdxT
+    # Keep the existing host identity across the product rename.
     PLUGIN_CODE MnSm
     FORMATS VST3 Standalone
-    PRODUCT_NAME "Mini Sampler"
+    PRODUCT_NAME "LoopX"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     COPY_PLUGIN_AFTER_BUILD TRUE)
 
-juce_generate_juce_header(MiniSampler)
+juce_generate_juce_header(LoopX)
 
-target_sources(MiniSampler
+target_sources(LoopX
     PRIVATE
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp)
 
-target_compile_definitions(MiniSampler
+target_compile_definitions(LoopX
     PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0)
 
-target_link_libraries(MiniSampler
+target_link_libraries(LoopX
     PRIVATE
         juce::juce_audio_utils
         juce::juce_gui_extra
@@ -71,18 +72,18 @@ target_link_libraries(MiniSampler
 
 # Exercise real JUCE drop dispatch, engine synchronization, state restore and
 # resize/audio concurrency on the same Windows runner that builds the VST3.
-juce_add_console_app(MiniSamplerChecks PRODUCT_NAME "MiniSamplerChecks")
-juce_generate_juce_header(MiniSamplerChecks)
-target_sources(MiniSamplerChecks PRIVATE Source/SamplerChecks.cpp)
-target_include_directories(MiniSamplerChecks PRIVATE Source)
-target_compile_definitions(MiniSamplerChecks PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
-target_link_libraries(MiniSamplerChecks PRIVATE MiniSampler juce::juce_audio_utils juce::juce_gui_extra signalsmith_stretch_headers)
+juce_add_console_app(LoopXChecks PRODUCT_NAME "LoopXChecks")
+juce_generate_juce_header(LoopXChecks)
+target_sources(LoopXChecks PRIVATE Source/SamplerChecks.cpp)
+target_include_directories(LoopXChecks PRIVATE Source)
+target_compile_definitions(LoopXChecks PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(LoopXChecks PRIVATE LoopX juce::juce_audio_utils juce::juce_gui_extra signalsmith_stretch_headers)
 # Keep both upstream MIT notices in every build artifact.
 configure_file(${signalsmith_stretch_SOURCE_DIR}/LICENSE.txt ${CMAKE_BINARY_DIR}/Signalsmith-Stretch-LICENSE.txt COPYONLY)
 configure_file(${signalsmith_stretch_SOURCE_DIR}/dsp/LICENSE.txt ${CMAKE_BINARY_DIR}/Signalsmith-DSP-LICENSE.txt COPYONLY)
 enable_testing()
-add_test(NAME MiniSamplerChecks COMMAND MiniSamplerChecks)
-set_tests_properties(MiniSamplerChecks PROPERTIES TIMEOUT 90)
+add_test(NAME LoopXChecks COMMAND LoopXChecks)
+set_tests_properties(LoopXChecks PROPERTIES TIMEOUT 90)
 add_executable(EngineChecks Source/EngineChecks.cpp)
 target_compile_features(EngineChecks PRIVATE cxx_std_17)
 target_link_libraries(EngineChecks PRIVATE signalsmith_stretch_headers)
