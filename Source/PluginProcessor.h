@@ -79,7 +79,11 @@ struct LoopXSample
 class LoopXAudioProcessor final : public juce::AudioProcessor, private juce::Thread, private juce::AsyncUpdater
 {
 public:
-    struct Loop { double start = 0.0, end = 0.0, beats = 0.0, fadeIn = 0.004, fadeOut = 0.004; };
+    struct Loop
+    {
+        double start = 0.0, end = 0.0, beats = 0.0, fadeIn = 0.004, fadeOut = 0.004;
+        double fadeInCurve = 0.0, fadeOutCurve = 0.0;
+    };
     struct ViewState
     {
         std::shared_ptr<const LoopXSample> sample;
@@ -90,6 +94,8 @@ public:
         bool snap = true, triplet = false, zeroCross = false, midiKeyTracking = false;
         bool brightGrid = false, stereoWaveform = false;
         int playbackMode = 0, theme = 0, velocityMode = 0, noteMode = 0, rootNote = 60;
+        int triggerMode = 0, lengthChangeMode = 0;
+        bool midiChannelLength = false, autoNoteNames = true;
         LoopXPalette palette = loopXPalette(0);
         bool customTheme = false;
         juce::String themeName = "Studio Dark";
@@ -141,9 +147,14 @@ public:
     bool importTheme(const juce::String&);
     juce::String exportTheme() const;
     void setNoteSettings(int mode, int root);
+    void setMidiChannelLengthEnabled(bool enabled);
+    void setAutoNoteNamesEnabled(bool enabled);
+    void setMidiTriggerMode(int mode);
+    void setLengthChangeMode(int mode);
     std::optional<juce::String> getNameForMidiNoteNumber(int, int) override;
     static juce::String noteLabel(int note) { return juce::MidiMessage::getMidiNoteName(note, true, true, 3); }
     void setLoopFades(double fadeIn, double fadeOut);
+    void setLoopFadeCurves(double fadeInCurve, double fadeOutCurve);
     void setStartOffset(double);
     bool matchBpm(double original);
     void selectSlot(int);
@@ -171,17 +182,25 @@ private:
     void flushPreferences();
     juce::var preferencesJson() const;
     void applyPreferences(const juce::var&);
+    void applyMidiChannelLength(int division);
     juce::File preferencesFile;
     std::atomic<bool> preferencesDirty{false};
     void publishLoop(const Loop&);
-    struct AtomicLoop { std::atomic<double> start{0}, end{0}, beats{0}, fadeIn{0.004}, fadeOut{0.004}; };
+    struct AtomicLoop
+    {
+        std::atomic<double> start{0}, end{0}, beats{0}, fadeIn{0.004}, fadeOut{0.004};
+        std::atomic<double> fadeInCurve{0}, fadeOutCurve{0};
+    };
     std::array<AtomicLoop, 11> regions;
     std::array<Loop, 11> rtRegions {};
     std::atomic<unsigned> slotSelectionVersion{0};
     unsigned lastSelectionVersion = 0;
     int lastVelocity = -1;
     std::atomic<int> regionCount{0}, liveSlot{0}, playbackMode{0}, velocityMode{0}, liveGrid{3};
-    std::atomic<int> noteMode{0}, rootNote{60};
+    std::atomic<int> noteMode{0}, rootNote{60}, triggerMode{0}, lengthChangeMode{0};
+    std::atomic<bool> midiChannelLength{false};
+    std::atomic<bool> autoNoteNames{true};
+    std::atomic<int> pendingLengthDivision{0};
     std::atomic<double> notePosition{-1};
     std::atomic<bool> liveSnap{true}, liveTriplet{false};
     std::atomic<double> sourceOffset{0}, timelineTempo{0};
@@ -193,7 +212,8 @@ private:
     std::array<uint64_t, 2048> heldNotes {};
     uint64_t noteOrder = 0;
     double midiPhase = 0, gateGain = 0, expectedBeat = 0;
-    int selectedSlot = 0, lastParameterSlot = -1, lastMode = -1;
+    bool latchGate = false;
+    int selectedSlot = 0, lastParameterSlot = -1, lastMode = -1, lastTriggerMode = -1;
     double outputRate = 44100.0, fallbackBeat = 0.0;
     int loopMidiNote = 60;
     Loop audioLoop;
