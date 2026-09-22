@@ -928,6 +928,45 @@ private:
     }
     LoopXAudioProcessor& processor; juce::ComboBox mode; juce::Slider root; juce::Label description; juce::TextButton done;
 };
+class MidiPerformancePanel final : public juce::Component, private juce::Timer
+{
+public:
+    explicit MidiPerformancePanel(LoopXAudioProcessor& p) : processor(p)
+    {
+        for (auto* c : std::initializer_list<juce::Component*>{&title,&trigger,&behavior,&lengthMode,&cursorMode,&timing,&preset,&lengthEnabled,&autoNames,&mapping,&activity,&reset,&done}) addAndMakeVisible(c);
+        title.setText("MIDI PERFORMANCE MATRIX",juce::dontSendNotification);
+        trigger.addItemList({"Gate / Hold","Latch / Toggle","One Shot"},1);
+        behavior.addItemList({"Retrigger","Legato / No Retrigger","Resume","Restart after release"},1);
+        lengthMode.addItemList({"Hold On / Momentary","Latch"},1);
+        cursorMode.addItemList({"Keep playback position","Restart from loop start"},1);
+        timing.addItemList({"Immediate","Next Grid","Next Beat","Next Bar","End of Loop"},1);
+        preset.addItemList({"Preset: Default","Preset: Live Play","Preset: DAW Quantized"},1);
+        lengthEnabled.setButtonText("Enable Channel 2-6 Loop Length control"); autoNames.setButtonText("Automatic MIDI note names");
+        mapping.setJustificationType(juce::Justification::topLeft);
+        mapping.setText("ROUTING - Conflict check: OK
+Main Notes: Ch 1 (protected)
+Loop Length: Ch 2 = 1 Bar, Ch 3 = 1/2, Ch 4 = 1/4, Ch 5 = 1/8, Ch 6 = 1/16
+Ch 7-16 remain available for normal notes and future mapping.
+Hold On restores the previous length; overlapping controls use the last held note.",juce::dontSendNotification);
+        reset.setButtonText("Reset Mapping"); done.setButtonText("Done");
+        trigger.onChange=[this]{if(!syncing)processor.setMidiTriggerMode(trigger.getSelectedId()-1);};
+        behavior.onChange=[this]{if(!syncing)processor.setMidiNoteBehavior(behavior.getSelectedId()-1);};
+        lengthMode.onChange=[this]{if(!syncing)processor.setLengthControlMode(lengthMode.getSelectedId()-1);};
+        cursorMode.onChange=[this]{if(!syncing)processor.setLengthChangeMode(cursorMode.getSelectedId()-1);};
+        timing.onChange=[this]{if(!syncing)processor.setTriggerTiming(timing.getSelectedId()-1);};
+        lengthEnabled.onClick=[this]{if(!syncing)processor.setMidiChannelLengthEnabled(lengthEnabled.getToggleState());};
+        autoNames.onClick=[this]{if(!syncing)processor.setAutoNoteNamesEnabled(autoNames.getToggleState());};
+        reset.onClick=[this]{processor.resetMidiMapping();sync();}; done.onClick=[this]{setVisible(false);};
+        preset.onChange=[this]{if(syncing)return; if(preset.getSelectedId()==1)processor.resetMidiMapping(); if(preset.getSelectedId()==2){processor.setMidiChannelLengthEnabled(true);processor.setMidiNoteBehavior(1);processor.setLengthControlMode(0);processor.setLengthChangeMode(0);processor.setTriggerTiming(0);} if(preset.getSelectedId()==3){processor.setMidiChannelLengthEnabled(true);processor.setMidiNoteBehavior(0);processor.setLengthControlMode(1);processor.setLengthChangeMode(1);processor.setTriggerTiming(3);} sync();};
+        sync(); startTimerHz(20);
+    }
+    void paint(juce::Graphics& g) override { const auto p=processor.getViewState().palette;g.fillAll(p.toolbar);g.setColour(p.buttonBorder);g.drawRect(getLocalBounds());g.setColour(flash>0?p.active:p.buttonBorder);g.fillEllipse(float(getWidth()-28),12,10,10); }
+    void resized() override { title.setBounds(12,8,300,24);done.setBounds(getWidth()-80,8,68,24);juce::ComboBox* b[]{&trigger,&behavior,&lengthMode,&cursorMode,&timing,&preset};for(int i=0;i<6;++i)b[i]->setBounds(154,42+i*31,getWidth()-166,24);lengthEnabled.setBounds(12,232,280,24);autoNames.setBounds(300,232,250,24);mapping.setBounds(12,264,getWidth()-24,105);activity.setBounds(12,374,330,22);reset.setBounds(getWidth()-120,370,108,28); }
+private:
+    void sync(){const auto s=processor.getViewState();syncing=true;trigger.setSelectedId(s.triggerMode+1,juce::dontSendNotification);behavior.setSelectedId(s.noteBehavior+1,juce::dontSendNotification);lengthMode.setSelectedId(s.lengthControlMode+1,juce::dontSendNotification);cursorMode.setSelectedId(s.lengthChangeMode+1,juce::dontSendNotification);timing.setSelectedId(s.triggerTiming+1,juce::dontSendNotification);lengthEnabled.setToggleState(s.midiChannelLength,juce::dontSendNotification);autoNames.setToggleState(s.autoNoteNames,juce::dontSendNotification);preset.setSelectedId(0,juce::dontSendNotification);syncing=false;}
+    void timerCallback() override {const auto c=processor.getMidiActivityCounter();if(c!=counter){counter=c;flash=5;}if(flash>0)--flash;juce::String s=processor.getLastMidiChannel()>0?"MIDI Ch "+juce::String(processor.getLastMidiChannel()):"MIDI idle";const int d=processor.getActiveLengthDivision();if(d>0)s+=" | "+juce::StringArray({"1 Bar","1/2","1/4","1/8","1/16"})[d-1];activity.setText(s,juce::dontSendNotification);sync();repaint();}
+    LoopXAudioProcessor& processor;juce::Label title,mapping,activity;juce::ComboBox trigger,behavior,lengthMode,cursorMode,timing,preset;juce::ToggleButton lengthEnabled,autoNames;juce::TextButton reset,done;bool syncing=false;unsigned counter=0;int flash=0;
+};
 class PositionPanel final : public juce::Component, private juce::Timer
 {
 public:
@@ -957,13 +996,14 @@ private:
 }
 void LoopXAudioProcessorEditor::showBpm()
 {
-    compactControlPanel = true; controlPanel = std::make_unique<BpmPanel>(processor); addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
+    compactControlPanel = true; controlPanelType = bpmTool; controlPanel = std::make_unique<BpmPanel>(processor); addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
 }
 void LoopXAudioProcessorEditor::showControlPanel(int type)
 {
-    compactControlPanel = false;
+    compactControlPanel = false; controlPanelType = type;
     if (type==51) controlPanel=std::make_unique<LoopXThemeEditor>(processor);
     else if (type==63) controlPanel=std::make_unique<NoteMappingPanel>(processor);
+    else if (type==66) controlPanel=std::make_unique<MidiPerformancePanel>(processor);
     else controlPanel=std::make_unique<PositionPanel>(processor);
     addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
 }
