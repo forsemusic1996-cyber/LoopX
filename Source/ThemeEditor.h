@@ -33,7 +33,7 @@ public:
 class LoopXThemeEditor final : public juce::Component, private juce::ChangeListener
 {
 public:
-    explicit LoopXThemeEditor(MiniSamplerAudioProcessor& p) : processor(p), initial(p.getViewState()),
+    explicit LoopXThemeEditor(LoopXAudioProcessor& p) : processor(p), initial(p.getViewState()),
         selector(juce::ColourSelector::showAlphaChannel | juce::ColourSelector::showColourAtTop |
                  juce::ColourSelector::editableColour | juce::ColourSelector::showSliders | juce::ColourSelector::showColourspace)
     {
@@ -115,8 +115,8 @@ private:
             if (ok && !exporting) { safe->name.setText(safe->processor.getViewState().themeName,false); safe->refreshSaved(); safe->selectColour(); safe->repaint(); }
         });
     }
-    MiniSamplerAudioProcessor& processor;
-    MiniSamplerAudioProcessor::ViewState initial;
+    LoopXAudioProcessor& processor;
+    LoopXAudioProcessor::ViewState initial;
     juce::TextEditor name;
     juce::ComboBox saved, base, element;
     juce::ColourSelector selector;
