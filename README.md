@@ -1,4 +1,4 @@
-# Mini Sampler / LoopX v0.4.1
+# LoopX v0.4.1
 JUCE is reproducibly pinned to release 9.0.2, commit `72782788ce18c2d4d760b28e0921d6ffc6431102`; the cloud build does not use a JUCE installation from the developer PC.
 JUCE Windows x64 VST3 sampler, built and tested by GitHub Actions.
 
@@ -44,6 +44,7 @@ Space requests host play/pause through supported transport control or Windows ho
 Some hosts intercept keys differently; this needs checking in each DAW.
 
 ## Project state
+LoopX keeps the existing manufacturer/plugin codes and automation parameter IDs. New state is saved with the `LoopX` tag; the previous state tag is still accepted when loading existing projects.
 Sample file paths are linked, not embedded. Keep the source WAV available when moving projects.
 START, BPM matching, loops, slots, fades, grid, playback/MIDI settings, theme, and editor size are saved.
 Five complete professional palettes: Studio Dark, Graphite, Slate, Warm Gray, Studio Light. Bright Grid is off by default.
@@ -56,7 +57,7 @@ Unload safety: bounded/chunked decode, cancellable waveform/render work, editor-
 
 ## Build
 GitHub Actions uses Windows 2022 / MSVC and CMake, builds VST3 and Standalone with static runtime and PDBs.
-Download MiniSampler-VST3 from the successful run and preserve the complete .vst3 bundle.
+Download LoopX-VST3 from the successful run and preserve the complete .vst3 bundle.
 The symbols artifact is optional for crash analysis.
 CTest checks file-drop targets, exact waveform peaks, UI state, loop tools, MIDI/automation, START, Signalsmith duration/pitch/stereo, and audio/resize concurrency.
 It also checks fresh-instance theme/grid restoration, local defaults, 33-field theme roundtrip/validation, note mappings/names, START speed invariance, cross-thread host state queries and repeated unload during rendering with an open panel.
