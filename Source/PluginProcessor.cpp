@@ -224,7 +224,7 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         }
         const int division = juce::jlimit(1, 5, action);
         const double tempo = gridTempo > 0 ? gridTempo : projectTempo.load();
-        const double beats = LoopMath::divisionBeats(division, numerator.load(), denominator.load());
+        const double beats = LoopMath::divisionBeats(action, numerator.load(), denominator.load());
         const double end = juce::jmin(logicalDuration, target.start + beats * 60.0 / tempo);
         if (end <= target.start + 0.001) return false;
         target.end = end; target.beats = (end - target.start) * tempo / 60.0;
@@ -394,8 +394,15 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         if (region.start != audioLoop.start || region.end != audioLoop.end || region.beats != audioLoop.beats)
         {
             const bool lengthOnly = lengthChanged && region.start == audioLoop.start;
+            const double oldCursor = audioLoop.start + midiPhase * juce::jmax(0.0, audioLoop.end - audioLoop.start);
             audioLoop = region;
             if (!lengthOnly || lengthChangeMode.load() == 1) midiPhase = 0;
+            else
+            {
+                const double newLength = juce::jmax(1.0e-9, region.end - region.start);
+                const double wrapped = oldCursor - region.start - std::floor((oldCursor - region.start) / newLength) * newLength;
+                midiPhase = wrapped / newLength;
+            }
             restart = true;
         }
         const double pitch = midiKeyTracking.load() && noteMode.load() == 0 ? std::pow(2.0, (loopMidiNote - 60) / 12.0) : 1;
@@ -429,7 +436,12 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         else outputTail = {};
         if (switchFade > 0) --switchFade;
         if (audible) cursor = region.start + phase * (region.end - region.start);
-        if (mode == 0) { midiPhase += beatStep * pitch / region.beats; midiPhase -= std::floor(midiPhase); }
+        if (mode == 0)
+        {
+            midiPhase += beatStep * pitch / region.beats;
+            if (midiPhase >= 1.0 && trigger == 2) { oneShotGate = false; gate = false; }
+            midiPhase -= std::floor(midiPhase);
+        }
     }
     playbackSeconds.store(cursor);
 }
@@ -718,7 +730,7 @@ void LoopXAudioProcessor::setNoteSettings(int mode, int root)
 void LoopXAudioProcessor::setMidiChannelLengthEnabled(bool enabled)
 {
     { const juce::ScopedLock lock(stateLock); state.midiChannelLength = enabled; midiChannelLength.store(enabled); }
-    if (!enabled) pendingLengthDivision.store(0);
+    if (!enabled) { pendingLengthDivision.store(0); heldLengthMask.store(0); activeLengthDivision.store(0); }
     uiChanged();
 }
 void LoopXAudioProcessor::setAutoNoteNamesEnabled(bool enabled)
@@ -731,18 +743,43 @@ void LoopXAudioProcessor::setMidiTriggerMode(int mode)
     { const juce::ScopedLock lock(stateLock); state.triggerMode = juce::jlimit(0,2,mode); triggerMode.store(state.triggerMode); }
     uiChanged();
 }
+void LoopXAudioProcessor::setMidiNoteBehavior(int mode)
+{
+    { const juce::ScopedLock lock(stateLock); state.noteBehavior = juce::jlimit(0,3,mode); noteBehavior.store(state.noteBehavior); }
+    uiChanged();
+}
+void LoopXAudioProcessor::setLengthControlMode(int mode)
+{
+    { const juce::ScopedLock lock(stateLock); state.lengthControlMode = juce::jlimit(0,1,mode); lengthControlMode.store(state.lengthControlMode); }
+    uiChanged();
+}
 void LoopXAudioProcessor::setLengthChangeMode(int mode)
 {
     { const juce::ScopedLock lock(stateLock); state.lengthChangeMode = juce::jlimit(0,1,mode); lengthChangeMode.store(state.lengthChangeMode); }
     uiChanged();
 }
-void LoopXAudioProcessor::applyMidiChannelLength(int division)
+void LoopXAudioProcessor::setTriggerTiming(int mode)
 {
-    if (!midiChannelLength.load() || division < 1 || division > 5) return;
+    { const juce::ScopedLock lock(stateLock); state.triggerTiming = juce::jlimit(0,4,mode); triggerTiming.store(state.triggerTiming); }
+    uiChanged();
+}
+void LoopXAudioProcessor::resetMidiMapping()
+{
+    setMidiChannelLengthEnabled(false); setMidiTriggerMode(0); setMidiNoteBehavior(0);
+    setLengthControlMode(0); setLengthChangeMode(0); setTriggerTiming(0); setAutoNoteNamesEnabled(true);
+}
+void LoopXAudioProcessor::applyMidiChannelLength(int action)
+{
+    if (!midiChannelLength.load() || action == 0 || action < -1 || action > 5) return;
     const juce::ScopedLock lock(stateLock);
     if (!state.sample) return;
     const int slot = velocityMode.load() == 1 || noteMode.load() == 1 ? liveSlot.load() : slotParameter->get();
     auto& loop = slot > 0 && slot <= int(state.slots.size()) ? state.slots[size_t(slot - 1)] : state.loop;
+    if (action == -1)
+    {
+        loop = { restoreStart.load(), restoreEnd.load(), restoreBeats.load(), restoreFadeIn.load(), restoreFadeOut.load(), restoreFadeInCurve.load(), restoreFadeOutCurve.load() };
+        publishLoop(state.loop); return;
+    }
     const double tempo = timelineTempo.load() > 0 ? timelineTempo.load() : projectTempo.load();
     const double duration = state.sample->duration() - state.playbackOffset;
     const double beats = LoopMath::divisionBeats(division, numerator.load(), denominator.load());
@@ -836,8 +873,10 @@ void LoopXAudioProcessor::setStateInformation(const void* data, int size)
     state.velocityMode = juce::jlimit(0,2,xml->getIntAttribute("velocityMode",0)); velocityMode.store(state.velocityMode);
     state.theme = juce::jlimit(0,4,xml->getIntAttribute("theme",0)); state.palette = loopXPalette(state.theme); state.customTheme = false;
     const juce::StringArray names {"Studio Dark","Graphite","Slate","Warm Gray","Studio Light"}; state.themeName = names[state.theme];
-    state.noteMode = 0; state.rootNote = 60; state.midiChannelLength = false; state.autoNoteNames = true; state.triggerMode = 0; state.lengthChangeMode = 0;
-    noteMode.store(0); rootNote.store(60); midiChannelLength.store(false); autoNoteNames.store(true); triggerMode.store(0); lengthChangeMode.store(0); notePosition.store(-1);
+    state.noteMode = 0; state.rootNote = 60; state.midiChannelLength = false; state.autoNoteNames = true;
+    state.triggerMode = 0; state.noteBehavior = 0; state.lengthControlMode = 0; state.lengthChangeMode = 0; state.triggerTiming = 0;
+    noteMode.store(0); rootNote.store(60); midiChannelLength.store(false); autoNoteNames.store(true); triggerMode.store(0);
+    noteBehavior.store(0); lengthControlMode.store(0); lengthChangeMode.store(0); triggerTiming.store(0); notePosition.store(-1);
     if (auto* settings = xml->getChildByName("SettingsJson")) applyPreferences(juce::JSON::parse(settings->getAllSubText()));
     state.startOffset = sane(xml->getDoubleAttribute("startOffset"));
     state.originalBpm = xml->getDoubleAttribute("originalBpm", 120); if (!validBpm(state.originalBpm)) state.originalBpm = 120;
