@@ -54,7 +54,7 @@ void LoopXAudioProcessor::uiChanged()
 void LoopXAudioProcessor::handleAsyncUpdate()
 {
     // No host callbacks under stateLock, during state restoration, or on loader.
-    if (int division = pendingLengthDivision.load(); division > 0)
+    if (int division = pendingLengthDivision.load(); division != 0)
     {
         applyMidiChannelLength(division);
         pendingLengthDivision.compare_exchange_strong(division, 0);
@@ -65,7 +65,7 @@ juce::var LoopXAudioProcessor::preferencesJson() const
 {
     const juce::ScopedLock lock(stateLock);
     auto* obj = new juce::DynamicObject;
-    obj->setProperty("format", "LoopXPreferences"); obj->setProperty("version", 1);
+    obj->setProperty("format", "LoopXPreferences"); obj->setProperty("version", 2);
     obj->setProperty("grid", state.grid); obj->setProperty("segments", state.segments);
     obj->setProperty("snap", state.snap); obj->setProperty("triplet", state.triplet); obj->setProperty("zeroCross", state.zeroCross);
     obj->setProperty("brightGrid", state.brightGrid); obj->setProperty("stereoWaveform", state.stereoWaveform);
@@ -73,7 +73,9 @@ juce::var LoopXAudioProcessor::preferencesJson() const
     obj->setProperty("velocityMode", state.velocityMode); obj->setProperty("noteMode", state.noteMode);
     obj->setProperty("midiChannelLength", state.midiChannelLength);
     obj->setProperty("autoNoteNames", state.autoNoteNames);
-    obj->setProperty("triggerMode", state.triggerMode); obj->setProperty("lengthChangeMode", state.lengthChangeMode);
+    obj->setProperty("triggerMode", state.triggerMode); obj->setProperty("noteBehavior", state.noteBehavior);
+    obj->setProperty("lengthControlMode", state.lengthControlMode);
+    obj->setProperty("lengthChangeMode", state.lengthChangeMode); obj->setProperty("triggerTiming", state.triggerTiming);
     obj->setProperty("rootNote", state.rootNote);
     obj->setProperty("theme", state.theme); obj->setProperty("customTheme", state.customTheme);
     obj->setProperty("palette", loopXThemeJson(state.palette, state.themeName));
@@ -82,7 +84,8 @@ juce::var LoopXAudioProcessor::preferencesJson() const
 }
 void LoopXAudioProcessor::applyPreferences(const juce::var& json)
 {
-    if (json["format"].toString() != "LoopXPreferences" || int(json["version"]) != 1) return;
+    const int version = int(json["version"]);
+    if (json["format"].toString() != "LoopXPreferences" || (version != 1 && version != 2)) return;
     state.grid = juce::jlimit(1,6,int(json["grid"])); state.segments = juce::jlimit(1,5,int(json["segments"]));
     state.snap = bool(json["snap"]); state.triplet = bool(json["triplet"]); state.zeroCross = bool(json["zeroCross"]);
     state.brightGrid = bool(json["brightGrid"]); state.stereoWaveform = bool(json["stereoWaveform"]);
@@ -90,7 +93,21 @@ void LoopXAudioProcessor::applyPreferences(const juce::var& json)
     state.velocityMode = juce::jlimit(0,2,int(json["velocityMode"])); state.noteMode = juce::jlimit(0,2,int(json["noteMode"]));
     state.midiChannelLength = bool(json["midiChannelLength"]);
     state.autoNoteNames = !json.getDynamicObject()->hasProperty("autoNoteNames") || bool(json["autoNoteNames"]);
-    state.triggerMode = juce::jlimit(0,2,int(json["triggerMode"])); state.lengthChangeMode = juce::jlimit(0,1,int(json["lengthChangeMode"]));
+    if (version == 1)
+    {
+        const int legacyTrigger = juce::jlimit(0,2,int(json["triggerMode"]));
+        state.triggerMode = legacyTrigger == 2 ? 1 : 0;
+        state.noteBehavior = legacyTrigger == 1 ? 1 : 0;
+        state.lengthControlMode = 1; state.triggerTiming = 0;
+    }
+    else
+    {
+        state.triggerMode = juce::jlimit(0,2,int(json["triggerMode"]));
+        state.noteBehavior = juce::jlimit(0,3,int(json["noteBehavior"]));
+        state.lengthControlMode = juce::jlimit(0,1,int(json["lengthControlMode"]));
+        state.triggerTiming = juce::jlimit(0,4,int(json["triggerTiming"]));
+    }
+    state.lengthChangeMode = juce::jlimit(0,1,int(json["lengthChangeMode"]));
     state.rootNote = juce::jlimit(0,118,int(json["rootNote"]));
     state.theme = juce::jlimit(0,4,int(json["theme"])); state.customTheme = bool(json["customTheme"]);
     state.palette = loopXPalette(state.theme);
@@ -105,7 +122,8 @@ void LoopXAudioProcessor::applyPreferences(const juce::var& json)
     liveGrid.store(state.grid); liveSnap.store(state.snap); liveTriplet.store(state.triplet);
     midiKeyTracking.store(state.midiKeyTracking); playbackMode.store(state.playbackMode); velocityMode.store(state.velocityMode);
     noteMode.store(state.noteMode); rootNote.store(state.rootNote); midiChannelLength.store(state.midiChannelLength); autoNoteNames.store(state.autoNoteNames);
-    triggerMode.store(state.triggerMode); lengthChangeMode.store(state.lengthChangeMode);
+    triggerMode.store(state.triggerMode); noteBehavior.store(state.noteBehavior); lengthControlMode.store(state.lengthControlMode);
+    lengthChangeMode.store(state.lengthChangeMode); triggerTiming.store(state.triggerTiming);
 }
 void LoopXAudioProcessor::loadPreferences()
 {
@@ -121,7 +139,10 @@ void LoopXAudioProcessor::flushPreferences()
 void LoopXAudioProcessor::prepareToPlay(double rate, int)
 {
     outputRate = juce::jmax(1.0, rate); fallbackBeat = 0; expectedBeat = 0;
-    heldNotes = {}; noteOrder = 0; loopMidiNote = 60; midiPhase = 0; gateGain = 0; latchGate = false;
+    heldNotes = {}; heldLengthNotes = {}; noteOrder = 0; loopMidiNote = 60; midiPhase = 0; gateGain = 0;
+    latchGate = false; oneShotGate = false; performanceStarted = false; lengthBaseValid = false;
+    queuedLengthAction = 0; queuedLengthTargetBeat = 0;
+    heldLengthMask.store(0); activeLengthDivision.store(0); lastMidiChannel.store(0);
     notePosition.store(-1);
     lastAudioSample = nullptr; lastParameterSlot = slotParameter->get(); selectedSlot = lastParameterSlot; lastMode = -1; lastTriggerMode = -1;
     lastSelectionVersion = slotSelectionVersion.load(); lastVelocity = velocityMode.load();
@@ -173,7 +194,7 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     const int mode = playbackMode.load(), velocity = velocityMode.load();
     if (mode != lastMode) { heldNotes = {}; gateGain = 0; engine.clear(); midiPhase = 0; lastMode = mode; }
     const int trigger = triggerMode.load();
-    if (trigger != lastTriggerMode) { heldNotes = {}; latchGate = false; gateGain = 0; lastTriggerMode = trigger; }
+    if (trigger != lastTriggerMode) { heldNotes = {}; latchGate = false; oneShotGate = false; gateGain = 0; lastTriggerMode = trigger; }
     const int parameterSlot = slotParameter->get();
     if (velocity != lastVelocity) { selectedSlot = parameterSlot; lastVelocity = velocity; midiPhase = 0; }
     const auto selectionVersion = slotSelectionVersion.load();
