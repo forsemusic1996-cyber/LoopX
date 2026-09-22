@@ -257,33 +257,52 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         while (event != eventEnd && (*event).samplePosition <= i)
         {
             const auto m = (*event).getMessage();
+            if (m.isNoteOnOrOff()) { lastMidiChannel.store(m.getChannel()); ++midiActivityCounter; }
             if (m.isNoteOn())
             {
-                const bool lengthCommand = midiChannelLength.load() && m.getChannel() <= 5;
+                const bool lengthCommand = midiChannelLength.load() && m.getChannel() >= 2 && m.getChannel() <= 6;
                 if (lengthCommand)
                 {
-                    const int division = m.getChannel();
-                    applyRealtimeLength(division);
-                    pendingLengthDivision.store(division);
-                    triggerAsyncUpdate();
-                    lengthChanged = true;
-                    // With channel mapping enabled, channels 1-5 are control
-                    // messages only. Trigger notes remain available on 6-16.
+                    const int division = m.getChannel() - 1;
+                    if (lengthControlMode.load() == 0)
+                    {
+                        const bool anyHeld = std::any_of(heldLengthNotes.begin(), heldLengthNotes.end(), [](uint64_t order){ return order != 0; });
+                        if (!anyHeld)
+                        {
+                            lengthBaseLoop = rtRegions[size_t(juce::jlimit(0, count, selectedSlot))]; lengthBaseValid = true;
+                            restoreStart.store(lengthBaseLoop.start); restoreEnd.store(lengthBaseLoop.end); restoreBeats.store(lengthBaseLoop.beats);
+                            restoreFadeIn.store(lengthBaseLoop.fadeIn); restoreFadeOut.store(lengthBaseLoop.fadeOut);
+                            restoreFadeInCurve.store(lengthBaseLoop.fadeInCurve); restoreFadeOutCurve.store(lengthBaseLoop.fadeOutCurve);
+                        }
+                        heldLengthNotes[size_t((m.getChannel() - 2) * 128 + m.getNoteNumber())] = ++noteOrder;
+                        heldLengthMask.store(heldLengthMask.load() | (1u << unsigned(division - 1)));
+                    }
+                    if (triggerTiming.load() == 0) { lengthChanged = applyRealtimeLength(division); publishLength(division); }
+                    else queueLength(division, beat + i * beatStep);
                     ++event; continue;
                 }
                 const bool wasGate = gate;
                 heldNotes[size_t((m.getChannel() - 1) * 128 + m.getNoteNumber())] = ++noteOrder;
                 loopMidiNote = m.getNoteNumber();
-                if (trigger == 2)
+                const int behavior = noteBehavior.load();
+                const bool shouldRestart = behavior == 0 || (behavior == 1 && !wasGate)
+                    || (behavior == 2 && !performanceStarted) || (behavior == 3 && !wasGate);
+                if (trigger == 1)
                 {
                     latchGate = !latchGate; gate = latchGate;
-                    if (gate) { midiPhase = 0; restart = true; }
+                    if (gate && shouldRestart) { midiPhase = 0; restart = true; }
+                }
+                else if (trigger == 2)
+                {
+                    oneShotGate = true; gate = true;
+                    if (shouldRestart) { midiPhase = 0; restart = true; }
                 }
                 else
                 {
                     gate = true;
-                    if (trigger == 0 || !wasGate) { midiPhase = 0; restart = true; }
+                    if (shouldRestart) { midiPhase = 0; restart = true; }
                 }
+                performanceStarted = true;
                 if (noteMode.load() == 1)
                 {
                     selectedSlot = m.getNoteNumber() - rootNote.load() + 1;
@@ -305,15 +324,45 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
             }
             if (m.isNoteOff())
             {
+                const bool lengthCommand = midiChannelLength.load() && m.getChannel() >= 2 && m.getChannel() <= 6;
+                if (lengthCommand)
+                {
+                    if (lengthControlMode.load() == 0)
+                    {
+                        heldLengthNotes[size_t((m.getChannel() - 2) * 128 + m.getNoteNumber())] = 0;
+                        uint64_t latestOrder = 0; int latestDivision = 0; unsigned mask = 0;
+                        for (size_t n = 0; n < heldLengthNotes.size(); ++n) if (heldLengthNotes[n] != 0)
+                        { mask |= 1u << unsigned(n / 128); if (heldLengthNotes[n] > latestOrder) { latestOrder = heldLengthNotes[n]; latestDivision = int(n / 128) + 1; } }
+                        heldLengthMask.store(mask);
+                        const int action = latestDivision > 0 ? latestDivision : -1;
+                        if (triggerTiming.load() == 0) { lengthChanged = applyRealtimeLength(action); publishLength(action); }
+                        else queueLength(action, beat + i * beatStep);
+                    }
+                    ++event; continue;
+                }
                 heldNotes[size_t((m.getChannel() - 1) * 128 + m.getNoteNumber())] = 0;
-                if (trigger != 2)
+                if (trigger == 0)
                 {
                     const auto latest = std::max_element(heldNotes.begin(), heldNotes.end());
                     gate = *latest != 0; if (gate) loopMidiNote = int(std::distance(heldNotes.begin(), latest)) % 128;
                 }
             }
-            if (m.isAllNotesOff() || m.isAllSoundOff()) { heldNotes = {}; latchGate = false; gate = false; }
+            if (m.isAllNotesOff() || m.isAllSoundOff())
+            {
+                heldNotes = {}; heldLengthNotes = {}; heldLengthMask.store(0); latchGate = false; oneShotGate = false; gate = false;
+                if (lengthControlMode.load() == 0 && lengthBaseValid) { lengthChanged = applyRealtimeLength(-1); publishLength(-1); }
+            }
             ++event;
+        }
+        if (queuedLengthAction != 0)
+        {
+            const bool loopBoundary = queuedLengthTargetBeat < 0 && midiPhase + beatStep / juce::jmax(0.0001, audioLoop.beats) >= 1.0;
+            const bool beatBoundary = queuedLengthTargetBeat >= 0 && beat + i * beatStep >= queuedLengthTargetBeat;
+            if (loopBoundary || beatBoundary)
+            {
+                const int action = queuedLengthAction; queuedLengthAction = 0;
+                lengthChanged = applyRealtimeLength(action); publishLength(action);
+            }
         }
         liveSlot.store(selectedSlot);
         Loop region = selectedSlot >= 0 && selectedSlot <= count ? rtRegions[size_t(selectedSlot)] : Loop{};
