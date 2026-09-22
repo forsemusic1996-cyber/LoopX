@@ -225,8 +225,10 @@ int main()
         p.positionParameter->setValueNotifyingHost(0); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,60,1.0f),0);
         p.processBlock(audio,midi);
         check(p.getViewState().loop.start == 0, "writing Loop Position zero works even when parameter value was already zero");
-        p.setLoopSelection(0.2,0.7,1); p.setLoopFades(0.02, 0.03);
-        check(p.getViewState().loop.fadeIn == 0.02 && p.getViewState().loop.fadeOut == 0.03, "independent loop fades are applied to engine state");
+        p.setLoopSelection(0.2,0.7,1); p.setLoopFades(0.02, 0.03); p.setLoopFadeCurves(0.65,-0.4);
+        check(p.getViewState().loop.fadeIn == 0.02 && p.getViewState().loop.fadeOut == 0.03
+              && p.getViewState().loop.fadeInCurve == 0.65 && p.getViewState().loop.fadeOutCurve == -0.4,
+              "independent loop fades and Ctrl-drag curves are applied to engine state");
 
         // Fade drag changes audio fades independently of Snap.
         p.setLoopSelection(0.2, 0.7, 1); wave->refreshFromProcessor();
@@ -404,6 +406,22 @@ int main()
         p.setUiSettings(5,1,false,false,false); p.positionParameter->setValueNotifyingHost(0.2f); p.processBlock(audio,midi);
         check(std::abs(p.getViewState().loop.start-0.3)<1e-6,"host position automation is continuous with Snap OFF");
 
+        p.setNoteSettings(0,60); p.setPlaybackSettings(0,0); p.setMidiChannelLengthEnabled(true);
+        p.setLoopSelection(0.1,1.1,2); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(4,60,1.0f),0); p.processBlock(audio,midi);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+        const auto channelLength=p.getViewState();
+        check(channelLength.midiChannelLength && std::abs(channelLength.loop.end-channelLength.loop.start-0.25)<1e-7 &&
+              std::abs(channelLength.loop.beats-0.5)<1e-7,
+              "MIDI Channel 4 selects 1/8 Loop Length and updates visible state");
+        p.setLoopSelection(0.1,1.1,2); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(6,60,1.0f),0); p.processBlock(audio,midi);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+        check(std::abs(p.getViewState().loop.end-p.getViewState().loop.start-1.0)<1e-7,
+              "MIDI channels 6-16 do not change Loop Length");
+        check(p.getNameForMidiNoteNumber(60,1).has_value()==false,"automatic note names follow the active note mapping");
+        p.setNoteSettings(1,60); check(p.getNameForMidiNoteNumber(60,1).value_or("")=="Slot 1","automatic note names expose mapped slots");
+        p.setAutoNoteNamesEnabled(false); check(!p.getNameForMidiNoteNumber(60,1).has_value(),"automatic note names can be disabled");
+        p.setAutoNoteNamesEnabled(true);
+
         auto palette=loopXPalette(2); palette.selection=juce::Colour(0x48112233); palette.loopFill=juce::Colour(0x80336699);
         palette.slot=juce::Colour(0xffee9955); palette.grid=juce::Colour(0xff574b67); palette.scrollThumb=juce::Colour(0xff807060);
         p.setCustomTheme(palette,"My Studio"); p.saveUserTheme("My Studio");
@@ -413,7 +431,7 @@ int main()
         check(!p.importTheme("{}") && p.getViewState().palette==palette,"invalid theme imports leave current palette untouched");
         check(p.renameUserTheme(0,"Renamed Studio") && p.loadUserTheme(0) && p.getViewState().themeName=="Renamed Studio",
               "user themes can be saved, renamed and reloaded without changing built-ins");
-        p.setUiSettings(6,4,false,false,true); p.setDisplaySettings(true,true); p.setNoteSettings(1,48);
+        p.setUiSettings(6,4,false,false,true); p.setDisplaySettings(true,true); p.setNoteSettings(1,48); p.setMidiChannelLengthEnabled(true); p.setAutoNoteNamesEnabled(false);
         juce::MemoryBlock completeState; p.getStateInformation(completeState);
         LoopXAudioProcessor fresh(juce::File{}); fresh.setTheme(4); fresh.setUiSettings(1,1,true,false,false);
         auto& freshHostInterface = static_cast<juce::AudioProcessor&>(fresh);
@@ -423,7 +441,7 @@ int main()
         freshHostInterface.removeListener(&restoreHost); waitForLoad(fresh);
         const auto complete=fresh.getViewState();
         check(complete.palette==palette && complete.customTheme && complete.themeName=="Renamed Studio" && complete.grid==6 && complete.segments==4 &&
-              !complete.snap && complete.zeroCross && complete.brightGrid && complete.stereoWaveform && complete.noteMode==1 && complete.rootNote==48,
+              !complete.snap && complete.zeroCross && complete.brightGrid && complete.stereoWaveform && complete.noteMode==1 && complete.rootNote==48 && complete.midiChannelLength && !complete.autoNoteNames,
               "fresh processor restores full theme + last grid settings; DAW state overrides defaults");
         auto* freshEditor=static_cast<LoopXAudioProcessorEditor*>(fresh.createEditor());
         LoopXWaveformView* freshWave=nullptr;
@@ -434,9 +452,9 @@ int main()
         delete freshEditor; juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
 
         const auto prefs=file.getSiblingFile(file.getFileNameWithoutExtension()+"-settings.json");
-        { LoopXAudioProcessor first(prefs); first.setCustomTheme(palette,"Persistent"); first.saveUserTheme("Persistent"); first.setUiSettings(6,4,false,false,true); }
+        { LoopXAudioProcessor first(prefs); first.setCustomTheme(palette,"Persistent"); first.saveUserTheme("Persistent"); first.setUiSettings(6,4,false,false,true); first.setMidiChannelLengthEnabled(true); first.setAutoNoteNamesEnabled(false); }
         { LoopXAudioProcessor second(prefs); const auto s=second.getViewState();
-          check(s.grid==6 && s.segments==4 && !s.snap && s.zeroCross && s.palette==palette && s.themeName=="Persistent",
+          check(s.grid==6 && s.segments==4 && !s.snap && s.zeroCross && s.palette==palette && s.themeName=="Persistent" && s.midiChannelLength && !s.autoNoteNames,
                 "plugin deletion / new instance restores last-used theme and grid from preferences"); }
         prefs.deleteFile();
         StateQueryHost queried; freshHostInterface.addListener(&queried);
