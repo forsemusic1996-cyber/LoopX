@@ -28,35 +28,35 @@ private:
     std::atomic<double>& position; std::atomic<double>& note;
 };
 }
-MiniSamplerAudioProcessor::MiniSamplerAudioProcessor(juce::File preferences)
+LoopXAudioProcessor::LoopXAudioProcessor(juce::File preferences)
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-      Thread("MiniSampler loader"), preferencesFile(std::move(preferences))
+      Thread("LoopX loader"), preferencesFile(std::move(preferences))
 {
     addParameter(slotParameter = new SlotControl(slotSelectionVersion, livePosition, notePosition));
     addParameter(positionParameter = new PositionControl(livePosition, notePosition));
     loadPreferences(); state.status = "Drop audio here"; startThread();
 }
-MiniSamplerAudioProcessor::~MiniSamplerAudioProcessor()
+LoopXAudioProcessor::~LoopXAudioProcessor()
 {
     cancelPendingUpdate(); signalThreadShouldExit(); notify();
     // Every decode/peak/render loop cooperatively checks cancellation. Never
     // force-kill a worker while it owns buffers or locks, or pump host messages.
     stopThread(-1);
 }
-juce::File MiniSamplerAudioProcessor::defaultPreferencesFile()
+juce::File LoopXAudioProcessor::defaultPreferencesFile()
 {
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("LoopX/settings.json");
 }
-void MiniSamplerAudioProcessor::uiChanged()
+void LoopXAudioProcessor::uiChanged()
 {
     preferencesDirty.store(true); notify(); triggerAsyncUpdate();
 }
-void MiniSamplerAudioProcessor::handleAsyncUpdate()
+void LoopXAudioProcessor::handleAsyncUpdate()
 {
     // No host callbacks under stateLock, during state restoration, or on loader.
     updateHostDisplay(ChangeDetails{}.withNonParameterStateChanged(true));
 }
-juce::var MiniSamplerAudioProcessor::preferencesJson() const
+juce::var LoopXAudioProcessor::preferencesJson() const
 {
     const juce::ScopedLock lock(stateLock);
     auto* obj = new juce::DynamicObject;
@@ -72,7 +72,7 @@ juce::var MiniSamplerAudioProcessor::preferencesJson() const
     juce::Array<juce::var> saved; for (const auto& theme : state.userThemes) saved.add(theme);
     obj->setProperty("userThemes", juce::var(saved)); return juce::var(obj);
 }
-void MiniSamplerAudioProcessor::applyPreferences(const juce::var& json)
+void LoopXAudioProcessor::applyPreferences(const juce::var& json)
 {
     if (json["format"].toString() != "LoopXPreferences" || int(json["version"]) != 1) return;
     state.grid = juce::jlimit(1,6,int(json["grid"])); state.segments = juce::jlimit(1,5,int(json["segments"]));
@@ -95,18 +95,18 @@ void MiniSamplerAudioProcessor::applyPreferences(const juce::var& json)
     midiKeyTracking.store(state.midiKeyTracking); playbackMode.store(state.playbackMode); velocityMode.store(state.velocityMode);
     noteMode.store(state.noteMode); rootNote.store(state.rootNote);
 }
-void MiniSamplerAudioProcessor::loadPreferences()
+void LoopXAudioProcessor::loadPreferences()
 {
     if (preferencesFile.existsAsFile() && preferencesFile.getSize() < 262144) applyPreferences(juce::JSON::parse(preferencesFile.loadFileAsString()));
 }
-void MiniSamplerAudioProcessor::flushPreferences()
+void LoopXAudioProcessor::flushPreferences()
 {
     if (!preferencesDirty.exchange(false) || preferencesFile == juce::File{}) return;
     const auto text = juce::JSON::toString(preferencesJson());
     static juce::CriticalSection fileLock; const juce::ScopedLock lock(fileLock);
     if (preferencesFile.getParentDirectory().createDirectory().wasOk()) preferencesFile.replaceWithText(text);
 }
-void MiniSamplerAudioProcessor::prepareToPlay(double rate, int)
+void LoopXAudioProcessor::prepareToPlay(double rate, int)
 {
     outputRate = juce::jmax(1.0, rate); fallbackBeat = 0; expectedBeat = 0;
     heldNotes = {}; noteOrder = 0; loopMidiNote = 60; midiPhase = 0; gateGain = 0;
@@ -116,13 +116,13 @@ void MiniSamplerAudioProcessor::prepareToPlay(double rate, int)
     engine.prepare(outputRate);
     outputTail = {}; switchTail = {}; switchFade = 0; previousValid = false;
 }
-bool MiniSamplerAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout) const
+bool LoopXAudioProcessor::isBusesLayoutSupported(const BusesLayout& layout) const
 {
     return layout.getMainInputChannelSet().isDisabled()
         && (layout.getMainOutputChannelSet() == juce::AudioChannelSet::mono()
             || layout.getMainOutputChannelSet() == juce::AudioChannelSet::stereo());
 }
-void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals; buffer.clear();
     audioReaders.fetch_add(1, std::memory_order_seq_cst);
@@ -139,7 +139,7 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     hostConnected.store(connected); hostPlaying.store(playing);
     const double beatStep = projectTempo.load() / (60.0 * outputRate);
     if (!connected || playing) fallbackBeat = beat + buffer.getNumSamples() * beatStep;
-    const MiniSamplerSample* sample = nullptr; double offset = 0, gridTempo = 0; int count = 0;
+    const LoopXSample* sample = nullptr; double offset = 0, gridTempo = 0; int count = 0;
     bool coherent = false;
     // Bounded seqlock: never wait on the UI/loader. All associated buffer and
     // coordinate changes are one transaction. Old buffers die on loader only.
@@ -276,14 +276,14 @@ void MiniSamplerAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, j
     }
     playbackSeconds.store(cursor);
 }
-void MiniSamplerAudioProcessor::requestSampleLoad(const juce::File& file, bool restoring)
+void LoopXAudioProcessor::requestSampleLoad(const juce::File& file, bool restoring)
 {
     if (!file.existsAsFile()) return;
     const juce::ScopedLock lock(stateLock);
     pendingFile = file; pendingRestore = restoring; ++requestVersion; ++transformVersion;
     loading.store(true); state.status = "Loading " + file.getFileName(); notify();
 }
-void MiniSamplerAudioProcessor::run()
+void LoopXAudioProcessor::run()
 {
     uint64_t handled = 0; juce::AudioFormatManager formats; formats.registerBasicFormats();
     while (!threadShouldExit())
@@ -293,13 +293,13 @@ void MiniSamplerAudioProcessor::run()
         { const juce::ScopedLock lock(stateLock); request = requestVersion; if (request != handled) { file = pendingFile; restore = pendingRestore; } }
         if (request != handled)
         {
-            std::shared_ptr<MiniSamplerSample> original;
+            std::shared_ptr<LoopXSample> original;
             try
             {
                 std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(file));
                 if (reader && reader->lengthInSamples > 1 && reader->lengthInSamples <= 20000000 && reader->sampleRate > 0 && reader->numChannels > 0 && !threadShouldExit())
                 {
-                    original = std::make_shared<MiniSamplerSample>(); original->rate = reader->sampleRate; original->file = file;
+                    original = std::make_shared<LoopXSample>(); original->rate = reader->sampleRate; original->file = file;
                     original->audio.setSize(juce::jmin(2, int(reader->numChannels)), int(reader->lengthInSamples));
                     const auto cancelled = [this, request]
                     { const juce::ScopedLock lock(stateLock); return threadShouldExit() || requestVersion != request; };
@@ -346,7 +346,7 @@ void MiniSamplerAudioProcessor::run()
             const double maxOffset = (job.originalSample->audio.getNumSamples() - 2) / job.originalSample->rate;
             const double offset = std::round(juce::jlimit(0.0, maxOffset, job.startOffset) * job.originalSample->rate) / job.originalSample->rate;
             const double ratio = job.stretchApplied ? job.originalBpm / job.targetBpm : 1;
-            std::shared_ptr<const MiniSamplerSample> processed;
+            std::shared_ptr<const LoopXSample> processed;
             juce::String error;
             try
             {
@@ -399,7 +399,7 @@ void MiniSamplerAudioProcessor::run()
     }
     flushPreferences();
 }
-MiniSamplerAudioProcessor::ViewState MiniSamplerAudioProcessor::getViewState() const
+LoopXAudioProcessor::ViewState LoopXAudioProcessor::getViewState() const
 {
     const juce::ScopedLock lock(stateLock); auto copy = state;
     const int slot = velocityMode.load() != 0 || noteMode.load() != 0 ? liveSlot.load() : slotParameter->get();
@@ -420,7 +420,7 @@ MiniSamplerAudioProcessor::ViewState MiniSamplerAudioProcessor::getViewState() c
     }
     return copy;
 }
-void MiniSamplerAudioProcessor::publishLoop(const Loop&)
+void LoopXAudioProcessor::publishLoop(const Loop&)
 {
     loopSequence.fetch_add(1, std::memory_order_seq_cst);
     for (int i = 0; i < 11; ++i)
@@ -434,7 +434,7 @@ void MiniSamplerAudioProcessor::publishLoop(const Loop&)
     audioSample.store(state.sample.get(), std::memory_order_seq_cst);
     loopSequence.fetch_add(1, std::memory_order_seq_cst);
 }
-void MiniSamplerAudioProcessor::setLoopSelection(double start, double end, double beats)
+void LoopXAudioProcessor::setLoopSelection(double start, double end, double beats)
 {
     { const juce::ScopedLock lock(stateLock); if (!state.sample) return;
     const double duration = state.sample->duration() - state.playbackOffset;
@@ -447,25 +447,25 @@ void MiniSamplerAudioProcessor::setLoopSelection(double start, double end, doubl
     livePosition.store(-1); notePosition.store(-1); publishLoop(state.loop); loopEnabled.store(true); }
     selectSlot(0); uiChanged();
 }
-void MiniSamplerAudioProcessor::stopLoop() { setLoopEnabled(false); }
-void MiniSamplerAudioProcessor::setLoopEnabled(bool enabled) { loopEnabled.store(enabled); triggerAsyncUpdate(); }
-void MiniSamplerAudioProcessor::selectSlot(int slot)
+void LoopXAudioProcessor::stopLoop() { setLoopEnabled(false); }
+void LoopXAudioProcessor::setLoopEnabled(bool enabled) { loopEnabled.store(enabled); triggerAsyncUpdate(); }
+void LoopXAudioProcessor::selectSlot(int slot)
 {
     slotParameter->beginChangeGesture(); slotParameter->setValueNotifyingHost(slotParameter->convertTo0to1(juce::jlimit(0, 10, slot))); slotParameter->endChangeGesture();
     liveSlot.store(slot); livePosition.store(-1); notePosition.store(-1);
 }
-void MiniSamplerAudioProcessor::saveSlot()
+void LoopXAudioProcessor::saveSlot()
 {
     const juce::ScopedLock lock(stateLock); const auto selected = getViewState().loop;
     if (selected.end > selected.start && state.slots.size() < 10) { state.slots.push_back(selected); publishLoop(state.loop); }
     uiChanged();
 }
-void MiniSamplerAudioProcessor::recallSlot(int index)
+void LoopXAudioProcessor::recallSlot(int index)
 {
     { const juce::ScopedLock lock(stateLock); if (!juce::isPositiveAndBelow(index, int(state.slots.size()))) return; }
     selectSlot(index + 1); setLoopEnabled(true);
 }
-void MiniSamplerAudioProcessor::deleteSlot(int index)
+void LoopXAudioProcessor::deleteSlot(int index)
 {
     int selected = -1;
     { const juce::ScopedLock lock(stateLock);
@@ -478,38 +478,38 @@ void MiniSamplerAudioProcessor::deleteSlot(int index)
     }
     if (selected >= 0) { selectSlot(selected); uiChanged(); }
 }
-void MiniSamplerAudioProcessor::setUiSettings(int grid, int segments, bool snap, bool triplet, bool zeroCross)
+void LoopXAudioProcessor::setUiSettings(int grid, int segments, bool snap, bool triplet, bool zeroCross)
 {
     { const juce::ScopedLock lock(stateLock);
       state.grid = juce::jlimit(1, 6, grid); state.segments = juce::jlimit(1, 5, segments); state.snap = snap; state.triplet = triplet; state.zeroCross = zeroCross;
       liveGrid.store(state.grid); liveSnap.store(snap); liveTriplet.store(triplet); }
     uiChanged();
 }
-void MiniSamplerAudioProcessor::setDisplaySettings(bool bright, bool stereo)
+void LoopXAudioProcessor::setDisplaySettings(bool bright, bool stereo)
 {
     { const juce::ScopedLock lock(stateLock); state.brightGrid = bright; state.stereoWaveform = stereo; }
     uiChanged();
 }
-void MiniSamplerAudioProcessor::setPlaybackSettings(int mode, int velocity)
+void LoopXAudioProcessor::setPlaybackSettings(int mode, int velocity)
 {
     { const juce::ScopedLock lock(stateLock);
       state.playbackMode = juce::jlimit(0, 1, mode); state.velocityMode = juce::jlimit(0, 2, velocity);
       playbackMode.store(state.playbackMode); velocityMode.store(state.velocityMode); livePosition.store(-1); }
     uiChanged();
 }
-void MiniSamplerAudioProcessor::setTheme(int theme)
+void LoopXAudioProcessor::setTheme(int theme)
 {
     { const juce::ScopedLock lock(stateLock);
       state.theme = juce::jlimit(0, 4, theme); state.palette = loopXPalette(state.theme); state.customTheme = false;
       const juce::StringArray names {"Studio Dark","Graphite","Slate","Warm Gray","Studio Light"}; state.themeName = names[state.theme]; }
     uiChanged();
 }
-void MiniSamplerAudioProcessor::setCustomTheme(const LoopXPalette& palette, juce::String name)
+void LoopXAudioProcessor::setCustomTheme(const LoopXPalette& palette, juce::String name)
 {
     { const juce::ScopedLock lock(stateLock); state.palette = palette; state.customTheme = true; state.themeName = name.trim().substring(0,80); }
     uiChanged();
 }
-void MiniSamplerAudioProcessor::saveUserTheme(juce::String name)
+void LoopXAudioProcessor::saveUserTheme(juce::String name)
 {
     name = name.trim().substring(0,80); if (name.isEmpty()) name = "Custom";
     { const juce::ScopedLock lock(stateLock); state.themeName = name; state.customTheme = true;
@@ -518,14 +518,14 @@ void MiniSamplerAudioProcessor::saveUserTheme(juce::String name)
       if (!replaced && state.userThemes.size() < 64) state.userThemes.push_back(doc); }
     uiChanged();
 }
-bool MiniSamplerAudioProcessor::loadUserTheme(int index)
+bool LoopXAudioProcessor::loadUserTheme(int index)
 {
     LoopXPalette palette; juce::String name;
     { const juce::ScopedLock lock(stateLock);
       if (!juce::isPositiveAndBelow(index,int(state.userThemes.size())) || !loopXReadTheme(state.userThemes[size_t(index)],palette,name)) return false; }
     setCustomTheme(palette,name); return true;
 }
-bool MiniSamplerAudioProcessor::renameUserTheme(int index, juce::String name)
+bool LoopXAudioProcessor::renameUserTheme(int index, juce::String name)
 {
     name = name.trim().substring(0,80); if (name.isEmpty()) return false;
     { const juce::ScopedLock lock(stateLock);
@@ -536,18 +536,18 @@ bool MiniSamplerAudioProcessor::renameUserTheme(int index, juce::String name)
       state.userThemes[size_t(index)] = loopXThemeJson(palette,name); state.themeName=name; }
     uiChanged(); return true;
 }
-bool MiniSamplerAudioProcessor::importTheme(const juce::String& text)
+bool LoopXAudioProcessor::importTheme(const juce::String& text)
 {
     if (text.length() > 65536) return false;
     LoopXPalette palette; juce::String name;
     if (!loopXReadTheme(juce::JSON::parse(text),palette,name)) return false;
     setCustomTheme(palette,name); saveUserTheme(name); return true;
 }
-juce::String MiniSamplerAudioProcessor::exportTheme() const
+juce::String LoopXAudioProcessor::exportTheme() const
 {
     const juce::ScopedLock lock(stateLock); return juce::JSON::toString(loopXThemeJson(state.palette,state.themeName));
 }
-void MiniSamplerAudioProcessor::setNoteSettings(int mode, int root)
+void LoopXAudioProcessor::setNoteSettings(int mode, int root)
 {
     { const juce::ScopedLock lock(stateLock); state.noteMode = juce::jlimit(0,2,mode);
       state.rootNote = juce::jlimit(0,118,root);
@@ -556,7 +556,7 @@ void MiniSamplerAudioProcessor::setNoteSettings(int mode, int root)
     ++slotSelectionVersion;
     uiChanged();
 }
-std::optional<juce::String> MiniSamplerAudioProcessor::getNameForMidiNoteNumber(int note, int)
+std::optional<juce::String> LoopXAudioProcessor::getNameForMidiNoteNumber(int note, int)
 {
     if (note < 0 || note > 127) return {};
     const int index = note - rootNote.load();
@@ -564,7 +564,7 @@ std::optional<juce::String> MiniSamplerAudioProcessor::getNameForMidiNoteNumber(
     if (noteMode.load() == 2) return "Grid " + juce::String(note + 1);
     return {};
 }
-void MiniSamplerAudioProcessor::setLoopFades(double in, double out)
+void LoopXAudioProcessor::setLoopFades(double in, double out)
 {
     const juce::ScopedLock lock(stateLock); const int slot = velocityMode.load() == 1 || noteMode.load()==1 ? liveSlot.load() : slotParameter->get();
     auto& loop = slot > 0 && slot <= int(state.slots.size()) ? state.slots[size_t(slot - 1)] : state.loop;
@@ -572,14 +572,14 @@ void MiniSamplerAudioProcessor::setLoopFades(double in, double out)
     loop.fadeIn = juce::jlimit(0.0, limit, sane(in)); loop.fadeOut = juce::jlimit(0.0, limit, sane(out)); publishLoop(state.loop);
     uiChanged();
 }
-void MiniSamplerAudioProcessor::setStartOffset(double value)
+void LoopXAudioProcessor::setStartOffset(double value)
 {
     const juce::ScopedLock lock(stateLock); if (!state.originalSample || !std::isfinite(value)) return;
     state.startOffset = juce::jlimit(0.0, (state.originalSample->audio.getNumSamples() - 2) / state.originalSample->rate, value);
     transformPending = true; ++transformVersion; loading.store(true); notify();
     uiChanged();
 }
-bool MiniSamplerAudioProcessor::matchBpm(double original)
+bool LoopXAudioProcessor::matchBpm(double original)
 {
     const juce::ScopedLock lock(stateLock);
     if (!state.originalSample || !validBpm(original)) return false;
@@ -587,10 +587,10 @@ bool MiniSamplerAudioProcessor::matchBpm(double original)
     transformPending = true; ++transformVersion; loading.store(true); notify();
     uiChanged(); return true;
 }
-void MiniSamplerAudioProcessor::setEditorSize(int width, int height) { const juce::ScopedLock lock(stateLock); state.width = width; state.height = height; }
-void MiniSamplerAudioProcessor::getStateInformation(juce::MemoryBlock& block)
+void LoopXAudioProcessor::setEditorSize(int width, int height) { const juce::ScopedLock lock(stateLock); state.width = width; state.height = height; }
+void LoopXAudioProcessor::getStateInformation(juce::MemoryBlock& block)
 {
-    const juce::ScopedLock lock(stateLock); juce::XmlElement xml("MiniSamplerLoopX");
+    const juce::ScopedLock lock(stateLock); juce::XmlElement xml("LoopX");
     xml.setAttribute("version", 4); xml.setAttribute("file", state.originalSample ? state.originalSample->file.getFullPathName() : pendingFile.getFullPathName());
     xml.createNewChildElement("SettingsJson")->addTextElement(juce::JSON::toString(preferencesJson()));
     const auto writeLoop = [](juce::XmlElement& x, const Loop& loop)
@@ -606,9 +606,11 @@ void MiniSamplerAudioProcessor::getStateInformation(juce::MemoryBlock& block)
     for (const auto& slot : state.slots) writeLoop(*xml.createNewChildElement("Slot"), slot);
     copyXmlToBinary(xml, block);
 }
-void MiniSamplerAudioProcessor::setStateInformation(const void* data, int size)
+void LoopXAudioProcessor::setStateInformation(const void* data, int size)
 {
-    const auto xml = getXmlFromBinary(data, size); if (!xml || !xml->hasTagName("MiniSamplerLoopX")) return;
+    const auto xml = getXmlFromBinary(data, size);
+    // Accept the previous state tag so existing projects retain their settings.
+    if (!xml || (!xml->hasTagName("LoopX") && !xml->hasTagName("MiniSamplerLoopX"))) return;
     const juce::ScopedLock lock(stateLock);
     const auto readLoop = [](const juce::XmlElement& x) { return Loop{sane(x.getDoubleAttribute("start")), sane(x.getDoubleAttribute("end")),
         sane(x.getDoubleAttribute("beats")), sane(x.getDoubleAttribute("fadeIn", 0.004)), sane(x.getDoubleAttribute("fadeOut", 0.004))}; };
@@ -641,5 +643,5 @@ void MiniSamplerAudioProcessor::setStateInformation(const void* data, int size)
     publishLoop(state.loop);
     const juce::File file(xml->getStringAttribute("file")); if (file.existsAsFile()) requestSampleLoad(file, true); else state.status = "Sample missing - use Load audio file in Settings";
 }
-juce::AudioProcessorEditor* MiniSamplerAudioProcessor::createEditor() { return new MiniSamplerAudioProcessorEditor(*this); }
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new MiniSamplerAudioProcessor(); }
+juce::AudioProcessorEditor* LoopXAudioProcessor::createEditor() { return new LoopXAudioProcessorEditor(*this); }
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new LoopXAudioProcessor(); }
