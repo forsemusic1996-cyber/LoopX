@@ -782,7 +782,7 @@ void LoopXAudioProcessor::applyMidiChannelLength(int action)
     }
     const double tempo = timelineTempo.load() > 0 ? timelineTempo.load() : projectTempo.load();
     const double duration = state.sample->duration() - state.playbackOffset;
-    const double beats = LoopMath::divisionBeats(division, numerator.load(), denominator.load());
+    const double beats = LoopMath::divisionBeats(action, numerator.load(), denominator.load());
     const double end = juce::jmin(duration, loop.start + beats * 60.0 / tempo);
     if (end - loop.start < 0.001) return;
     loop.end = end;
