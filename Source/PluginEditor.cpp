@@ -197,7 +197,10 @@ void LoopXWaveformView::timerCallback()
     const auto oldGrid = state.grid; const auto oldSegments = state.segments;
     refresh();
     if (dirtyCache && juce::Time::getMillisecondCounterHiRes() - lastResize > 90.0) rebuildWaveCache();
-    if (state.loop.start != oldLoop.start || state.loop.end != oldLoop.end || state.grid != oldGrid || state.segments != oldSegments) repaint();
+    if (state.loop.start != oldLoop.start || state.loop.end != oldLoop.end
+        || state.loop.fadeIn != oldLoop.fadeIn || state.loop.fadeOut != oldLoop.fadeOut
+        || state.loop.fadeInCurve != oldLoop.fadeInCurve || state.loop.fadeOutCurve != oldLoop.fadeOutCurve
+        || state.grid != oldGrid || state.segments != oldSegments) repaint();
     const double nextCursor = editingStart ? -1 : processor.getPlaybackSeconds();
     if (nextCursor != cursor)
     {
@@ -267,9 +270,22 @@ void LoopXWaveformView::paint(juce::Graphics& g)
         const float inX = xForTime(state.loop.start + state.loop.fadeIn);
         const float outX = xForTime(state.loop.end - state.loop.fadeOut);
         g.saveState(); g.reduceClipRegion(area.toNearestInt());
-        g.setColour(palette.fade);
-        g.drawLine(startX, area.getBottom(), inX, area.getY() + 22, 1.2f);
-        g.drawLine(outX, area.getY() + 22, endX, area.getBottom(), 1.2f);
+        const auto drawFade = [&](bool fadeIn)
+        {
+            const double curve = fadeIn ? state.loop.fadeInCurve : state.loop.fadeOutCurve;
+            const double exponent = std::pow(4.0,-curve);
+            const float x0 = fadeIn ? startX : outX, x1 = fadeIn ? inX : endX;
+            juce::Path path; path.startNewSubPath(x0, fadeIn ? area.getBottom() : area.getY()+22);
+            for (int n=1;n<=32;++n)
+            {
+                const double t=double(n)/32.0, gain=std::pow(fadeIn?t:1.0-t,exponent);
+                path.lineTo(juce::jmap(float(t),x0,x1),area.getBottom()-float(gain)*(area.getHeight()-22.0f));
+            }
+            const bool active = fadeIn ? hoverFade==8 || dragMode==11 : hoverFade==9 || dragMode==12;
+            g.setColour(active ? palette.active : palette.fade); g.strokePath(path,juce::PathStrokeType(active?2.2f:1.2f));
+        };
+        drawFade(true); drawFade(false);
+        g.setColour(hoverFade != 0 || dragMode == 11 || dragMode == 12 ? palette.active : palette.fade);
         g.fillRect(inX - 4, area.getY() + 18, 8.0f, 8.0f);
         g.fillRect(outX - 4, area.getY() + 18, 8.0f, 8.0f);
         g.restoreState();
@@ -437,6 +453,12 @@ void LoopXWaveformView::mouseDown(const juce::MouseEvent& event)
         repaint(); return;
     }
     const int hit = hitTestTool(float(event.x), float(event.y));
+    if (event.mods.isCtrlDown() && (hit == 8 || hit == 9))
+    {
+        dragMode = hit == 8 ? 11 : 12; dragStart = event.y;
+        dragCurve = hit == 8 ? state.loop.fadeInCurve : state.loop.fadeOutCurve;
+        return;
+    }
     if (hit == 8 || hit == 9) { dragMode = hit; return; }
     if (hit == 4)
     {
@@ -464,6 +486,13 @@ void LoopXWaveformView::mouseDrag(const juce::MouseEvent& event)
     if (dragMode == 10)
     {
         draftStart = std::round(timeForX(float(event.x)) * state.originalSample->rate) / state.originalSample->rate;
+    }
+    else if (dragMode == 11 || dragMode == 12)
+    {
+        const double curve = juce::jlimit(-1.0,1.0,dragCurve + (dragStart-event.y)/80.0);
+        processor.setLoopFadeCurves(dragMode==11 ? curve : state.loop.fadeInCurve,
+                                    dragMode==12 ? curve : state.loop.fadeOutCurve);
+        refresh(); hoverFade = dragMode==11 ? 8 : 9;
     }
     else if (dragMode == 8 || dragMode == 9)
     {
@@ -556,11 +585,13 @@ int LoopXWaveformView::hitTestTool(float x, float y) const
 void LoopXWaveformView::mouseMove(const juce::MouseEvent& e)
 {
     const int hit = hitTestTool(float(e.x), float(e.y));
+    const int nextHover = e.mods.isCtrlDown() && (hit==8 || hit==9) ? hit : 0;
+    if (nextHover != hoverFade) { hoverFade=nextHover; repaint(); }
     // JUCE maps this standard cursor directly to IDC_SIZEALL on Windows.
-    setMouseCursor(hit == 4 ? juce::MouseCursor::UpDownLeftRightResizeCursor :
+    setMouseCursor(nextHover ? juce::MouseCursor::UpDownLeftRightResizeCursor : hit == 4 ? juce::MouseCursor::UpDownLeftRightResizeCursor :
         (hit != 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor));
 }
-void LoopXWaveformView::mouseExit(const juce::MouseEvent&) { if (dragMode == 0) setMouseCursor(juce::MouseCursor::NormalCursor); }
+void LoopXWaveformView::mouseExit(const juce::MouseEvent&) { if (dragMode == 0) { hoverFade=0; setMouseCursor(juce::MouseCursor::NormalCursor); repaint(); } }
 void LoopXWaveformView::toggleStart()
 {
     refresh();
@@ -682,7 +713,7 @@ void LoopXAudioProcessorEditor::menuFor(int id)
     }
     if (id == settings)
     {
-        juce::PopupMenu playback, midi, display, themes;
+        juce::PopupMenu playback, midi, channelLength, triggerModes, lengthChangeModes, display, themes;
         playback.addItem(20, "MIDI Trigger", true, state.playbackMode == 0);
         playback.addItem(21, "Continuous / Host Sync", true, state.playbackMode == 1);
         midi.addItem(6, "MIDI key tracking", true, state.midiKeyTracking);
@@ -695,6 +726,23 @@ void LoopXAudioProcessorEditor::menuFor(int id)
         midi.addItem(61,"MIDI Note -> Slot",true,state.noteMode==1);
         midi.addItem(62,"MIDI Note -> Loop Position",true,state.noteMode==2);
         midi.addItem(63,"Note mapping... (Slot 1: " + LoopXAudioProcessor::noteLabel(state.rootNote) + ")");
+        midi.addItem(65,"Automatic MIDI note names",true,state.autoNoteNames);
+        triggerModes.addItem(80,"Gate / Restart — each Note On restarts",true,state.triggerMode==0);
+        triggerModes.addItem(81,"Gate / Legato — overlapping notes keep position",true,state.triggerMode==1);
+        triggerModes.addItem(82,"Latch — Note On toggles play / stop",true,state.triggerMode==2);
+        midi.addSubMenu("Trigger mode",triggerModes);
+        channelLength.addItem(70, "Enabled — Note On channel changes Loop Length", true, state.midiChannelLength);
+        channelLength.addSeparator();
+        channelLength.addItem(71, "Channel 1  →  1 Bar", false);
+        channelLength.addItem(72, "Channel 2  →  1/2", false);
+        channelLength.addItem(73, "Channel 3  →  1/4", false);
+        channelLength.addItem(74, "Channel 4  →  1/8", false);
+        channelLength.addItem(75, "Channel 5  →  1/16", false);
+        lengthChangeModes.addItem(76,"Seamless — keep current loop phase",true,state.lengthChangeMode==0);
+        lengthChangeModes.addItem(77,"Retrigger — restart at new loop start",true,state.lengthChangeMode==1);
+        channelLength.addSubMenu("Change behavior",lengthChangeModes);
+        midi.addSeparator();
+        midi.addSubMenu("Channel → Loop Length" + juce::String(state.midiChannelLength ? " (On)" : " (Off)"), channelLength);
         display.addItem(2, "Stereo waveform", true, state.stereoWaveform);
         display.addItem(3, "Bright Grid", true, state.brightGrid);
         const juce::StringArray names {"Studio Dark", "Graphite", "Slate", "Warm Gray", "Studio Light"};
@@ -706,6 +754,9 @@ void LoopXAudioProcessorEditor::menuFor(int id)
         menu.addSubMenu("Display", display); menu.addSubMenu("Themes", themes);
         menu.addSeparator(); menu.addItem(50, "Load audio file...");
         menu.addItem(64,"Loop Position (automation)...");
+        menu.addSeparator();
+        menu.addItem(90,"✦ Made by Andrew Dihtiaruk",false);
+        menu.addItem(91,"✦ Support Ko-Fi");
     }
     juce::Component::SafePointer<LoopXAudioProcessorEditor> safe(this);
     menu.showMenuAsync(loopXMenuOptions(*this, menuPosition), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
@@ -728,6 +779,11 @@ void LoopXAudioProcessorEditor::handleMenu(int id, int result)
         if (result == 50) chooseFile();
         if (result == 51 || result == 63 || result == 64) showControlPanel(result);
         if (result >= 60 && result <= 62) processor.setNoteSettings(result-60,state.rootNote);
+        if (result == 65) processor.setAutoNoteNamesEnabled(!state.autoNoteNames);
+        if (result == 70) processor.setMidiChannelLengthEnabled(!state.midiChannelLength);
+        if (result == 76 || result == 77) processor.setLengthChangeMode(result-76);
+        if (result >= 80 && result <= 82) processor.setMidiTriggerMode(result-80);
+        if (result == 91) juce::URL("https://ko-fi.com/pianohousestudio/shop").launchInDefaultBrowser();
         if (result >= 200 && result < 264) processor.loadUserTheme(result-200);
     }
     state = processor.getViewState(); layoutTools(); waveform.refreshFromProcessor(); repaint();
