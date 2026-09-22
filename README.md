@@ -22,9 +22,11 @@ Settings > MIDI: Velocity Off, Velocity -> Slot, or Velocity -> Loop Position.
 Velocity slot boundaries: 1–13, 14–26, 27–39, 40–51, 52–64, 65–77, 78–89, 90–102, 103–115, 116–127.
 Settings > MIDI also offers Note -> Slot and Note -> Loop Position (both optional, initially off).
 Automatic MIDI note names can be enabled or disabled in Settings > MIDI and are saved with the project and local preferences.
-Settings > MIDI > Channel -> Loop Length optionally maps Note On channels to musical lengths: Channel 1 = 1 Bar, 2 = 1/2, 3 = 1/4, 4 = 1/8, and 5 = 1/16. When enabled, channels 1-5 are length controls and trigger notes remain on channels 6-16.
-If a length control and trigger note share a timestamp, the selected length is applied before audio is rendered. During a held note, Seamless keeps the current loop phase while Retrigger restarts at the new loop start.
-MIDI Trigger mode offers Gate / Restart, Gate / Legato, and Latch; the selected trigger and length-change behaviors are saved.
+The MIDI button before BPM opens the wide MIDI Performance Matrix. The same controls remain available in Settings > MIDI.
+Channel 1 is always protected for ordinary notes. Optional Loop Length control maps Channel 2 = 1 Bar, 3 = 1/2, 4 = 1/4, 5 = 1/8, and 6 = 1/16; Channels 7-16 remain available for ordinary notes and future mapping.
+Hold On / Momentary applies a length only while its control note is held, restores the previous length on Note Off, and gives the most recently pressed control priority when notes overlap. Latch keeps the chosen length.
+Keep playback position preserves the absolute cursor and wraps it inside a shorter loop; Restart from loop start resets it. Timing choices are Immediate, Next Grid, Next Beat, Next Bar, and End of Loop.
+Trigger modes are Gate / Hold, Latch / Toggle, and One Shot. Note behavior is selected separately: Retrigger, Legato / No Retrigger, Resume, or Restart after release. All choices persist in the project and local preferences.
 Note -> Slot: root note (default MIDI 60, shown as C3 in LoopX) selects Slot 1; the next nine semitones select Slots 2–10.
 Slot markers show the note name. Note mapping shows note/velocity ranges. Empty slots are silent.
 Note -> Loop Position: MIDI notes 0–127 select the first 128 grid divisions, preserving loop length, beat length and pitch. No banks.
