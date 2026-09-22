@@ -115,6 +115,7 @@ private:
     LoopXLookAndFeel lookAndFeel;
     std::unique_ptr<juce::Component> controlPanel;
     bool compactControlPanel = false;
+    int controlPanelType = 0;
     int hoveredTool = 0;
     double lastTempo = 120.0;
     bool lastPlaying = false;
