@@ -29,46 +29,46 @@ constexpr int load = 1, set = 2, add = 3, length = 4, twice = 5, half = 6,
 const juce::StringArray divisions { "1 Bar", "1/2", "1/4", "1/8", "1/16", "1/32" };
 }
 
-MiniSamplerWaveformView::MiniSamplerWaveformView(MiniSamplerAudioProcessor& p) : processor(p)
+LoopXWaveformView::LoopXWaveformView(LoopXAudioProcessor& p) : processor(p)
 {
     setOpaque(true); refresh(); startTimerHz(30);
 }
-MiniSamplerWaveformView::~MiniSamplerWaveformView()
+LoopXWaveformView::~LoopXWaveformView()
 {
     stopTimer();
     if (loopPositionGesture) processor.positionParameter->endChangeGesture();
 }
-const MiniSamplerSample* MiniSamplerWaveformView::drawingSample() const
+const LoopXSample* LoopXWaveformView::drawingSample() const
 {
     return editingStart ? state.originalSample.get() : state.sample.get();
 }
-double MiniSamplerWaveformView::duration() const
+double LoopXWaveformView::duration() const
 {
     const auto* sample = drawingSample();
     return sample ? sample->duration() - (editingStart ? 0 : state.playbackOffset) : 0;
 }
-double MiniSamplerWaveformView::visibleLength() const { return duration() / zoom; }
-juce::Rectangle<float> MiniSamplerWaveformView::waveArea() const
+double LoopXWaveformView::visibleLength() const { return duration() / zoom; }
+juce::Rectangle<float> LoopXWaveformView::waveArea() const
 {
     return getLocalBounds().toFloat().withTrimmedTop(14.0f).withTrimmedBottom(18.0f).reduced(4.0f, 0.0f);
 }
-float MiniSamplerWaveformView::xForTime(double time) const
+float LoopXWaveformView::xForTime(double time) const
 {
     const auto area = waveArea();
     return area.getX() + static_cast<float>((time - viewStart) / juce::jmax(1.0e-9, visibleLength())) * area.getWidth();
 }
-double MiniSamplerWaveformView::timeForX(float x) const
+double LoopXWaveformView::timeForX(float x) const
 {
     const auto area = waveArea();
     return juce::jlimit(0.0, duration(), viewStart + (x - area.getX()) / juce::jmax(1.0f, area.getWidth()) * visibleLength());
 }
-double MiniSamplerWaveformView::gridSeconds() const
+double LoopXWaveformView::gridSeconds() const
 {
     auto beats = LoopMath::divisionBeats(state.grid, processor.getProjectTimeSignatureNumerator(), processor.getProjectTimeSignatureDenominator());
     if (state.triplet) beats *= 2.0 / 3.0;
     return beats * 60.0 / processor.getTimelineTempo();
 }
-double MiniSamplerWaveformView::snapTime(double time) const
+double LoopXWaveformView::snapTime(double time) const
 {
     if (state.snap) return juce::jlimit(0.0, duration(), std::round(time / gridSeconds()) * gridSeconds());
     if (!state.zeroCross || !state.sample) return juce::jlimit(0.0, duration(), time);
@@ -83,28 +83,28 @@ double MiniSamplerWaveformView::snapTime(double time) const
             if (std::abs(i - target) < distance) { nearest = i; distance = std::abs(i - target); }
     return juce::jlimit(0.0, duration(), nearest / sample.rate - state.playbackOffset);
 }
-bool MiniSamplerWaveformView::isInterestedInFileDrag(const juce::StringArray& files)
+bool LoopXWaveformView::isInterestedInFileDrag(const juce::StringArray& files)
 {
     for (const auto& name : files) if (audioFile(fileFromText(name))) return true;
     return false;
 }
-void MiniSamplerWaveformView::filesDropped(const juce::StringArray& files, int, int)
+void LoopXWaveformView::filesDropped(const juce::StringArray& files, int, int)
 {
     dragOver = false;
     for (const auto& name : files)
         if (const auto file = fileFromText(name); audioFile(file)) { processor.requestSampleLoad(file); break; }
     repaint();
 }
-void MiniSamplerWaveformView::fileDragEnter(const juce::StringArray&, int, int) { dragOver = true; repaint(); }
-void MiniSamplerWaveformView::fileDragExit(const juce::StringArray&) { dragOver = false; repaint(); }
-bool MiniSamplerWaveformView::isInterestedInTextDrag(const juce::String& text) { return audioFile(fileFromText(text)); }
-void MiniSamplerWaveformView::textDropped(const juce::String& text, int, int)
+void LoopXWaveformView::fileDragEnter(const juce::StringArray&, int, int) { dragOver = true; repaint(); }
+void LoopXWaveformView::fileDragExit(const juce::StringArray&) { dragOver = false; repaint(); }
+bool LoopXWaveformView::isInterestedInTextDrag(const juce::String& text) { return audioFile(fileFromText(text)); }
+void LoopXWaveformView::textDropped(const juce::String& text, int, int)
 {
     dragOver = false;
     const auto file = fileFromText(text); if (audioFile(file)) processor.requestSampleLoad(file);
     repaint();
 }
-void MiniSamplerWaveformView::refresh()
+void LoopXWaveformView::refresh()
 {
     auto next = processor.getViewState();
     const bool changed = next.sample != state.sample;
@@ -127,13 +127,13 @@ void MiniSamplerWaveformView::refresh()
     if (!pendingSelection && dragMode == 0) { selectionStart = state.loop.start; selectionEnd = state.loop.end; }
     if (changed || overlaysChanged || displayChanged) repaint();
 }
-void MiniSamplerWaveformView::resized()
+void LoopXWaveformView::resized()
 {
     // During live resize paint simply scales the previous cached image.
     // Rebuild peaks geometry only after the resize has settled.
     dirtyCache = true; lastResize = juce::Time::getMillisecondCounterHiRes();
 }
-void MiniSamplerWaveformView::rebuildWaveCache()
+void LoopXWaveformView::rebuildWaveCache()
 {
     dirtyCache = false;
     const auto* sample = drawingSample();
@@ -191,7 +191,7 @@ void MiniSamplerWaveformView::rebuildWaveCache()
     }
     repaint();
 }
-void MiniSamplerWaveformView::timerCallback()
+void LoopXWaveformView::timerCallback()
 {
     const auto oldLoop = state.loop;
     const auto oldGrid = state.grid; const auto oldSegments = state.segments;
@@ -206,7 +206,7 @@ void MiniSamplerWaveformView::timerCallback()
         if (cursor >= 0) repaint(static_cast<int>(xForTime(cursor)) - 4, 0, 9, getHeight());
     }
 }
-void MiniSamplerWaveformView::paint(juce::Graphics& g)
+void LoopXWaveformView::paint(juce::Graphics& g)
 {
     const auto palette = state.palette;
     g.fillAll(palette.background);
@@ -306,7 +306,7 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         if (line.getWidth() > 0)
         {
             g.setColour(palette.slotText); g.setFont(16.0f);
-            const auto label = juce::String(int(i)+1) + " " + MiniSamplerAudioProcessor::noteLabel(juce::jmin(127,state.rootNote+int(i)));
+            const auto label = juce::String(int(i)+1) + " " + LoopXAudioProcessor::noteLabel(juce::jmin(127,state.rootNote+int(i)));
             g.drawText(label, static_cast<int>(line.getX()) + 2, getHeight() - 39, juce::jmin(90,int(line.getWidth())-2), 18, juce::Justification::centredLeft);
         }
     }
@@ -334,17 +334,17 @@ void MiniSamplerWaveformView::paint(juce::Graphics& g)
         g.drawText("Release to load sample", area, juce::Justification::centred);
     }
 }
-void MiniSamplerWaveformView::commit(double start, double end, double beats)
+void LoopXWaveformView::commit(double start, double end, double beats)
 {
     processor.setLoopSelection(start, end, beats); pendingSelection = false; refresh();
     selectionStart = state.loop.start; selectionEnd = state.loop.end;
     repaint(); if (onChanged) onChanged();
 }
-void MiniSamplerWaveformView::applySelection()
+void LoopXWaveformView::applySelection()
 {
     if (state.segments == 1 && pendingSelection && selectionEnd > selectionStart) commit(selectionStart, selectionEnd);
 }
-void MiniSamplerWaveformView::activateSegmentAt(float x)
+void LoopXWaveformView::activateSegmentAt(float x)
 {
     if (state.segments <= 1) return;
     const double seconds = LoopMath::divisionBeats(1, processor.getProjectTimeSignatureNumerator(), processor.getProjectTimeSignatureDenominator())
@@ -353,7 +353,7 @@ void MiniSamplerWaveformView::activateSegmentAt(float x)
     pendingSelection = false;
     commit(start, juce::jmin(duration(), start + seconds));
 }
-void MiniSamplerWaveformView::setLoopPositionParameter(double start)
+void LoopXWaveformView::setLoopPositionParameter(double start)
 {
     const double length = dragLoopEnd - dragLoopStart;
     const double lastStart = juce::jmax(0.0, duration() - length);
@@ -362,36 +362,36 @@ void MiniSamplerWaveformView::setLoopPositionParameter(double start)
     refresh();
     if (onChanged) onChanged();
 }
-void MiniSamplerWaveformView::setMusicalLength(double beats)
+void LoopXWaveformView::setMusicalLength(double beats)
 {
     refresh();
     const auto start = pendingSelection ? juce::jmin(selectionStart, selectionEnd) : state.loop.start;
     const auto end = juce::jmin(duration(), start + beats * 60.0 / processor.getTimelineTempo());
     if (end > start) commit(start, end, (end - start) * processor.getTimelineTempo() / 60.0);
 }
-void MiniSamplerWaveformView::scaleLength(double factor)
+void LoopXWaveformView::scaleLength(double factor)
 {
     refresh(); if (state.loop.end <= state.loop.start) return;
     const auto end = LoopMath::scaledEnd(state.loop.start, state.loop.end, duration(), factor);
     const auto beats = state.loop.beats * (end - state.loop.start) / (state.loop.end - state.loop.start);
     commit(state.loop.start, end, beats);
 }
-void MiniSamplerWaveformView::moveLoop(double seconds)
+void LoopXWaveformView::moveLoop(double seconds)
 {
     refresh(); const double len = state.loop.end - state.loop.start;
     if (len <= 0) return;
     const auto start = juce::jlimit(0.0, juce::jmax(0.0, duration() - len), state.loop.start + seconds);
     commit(start, start + len, state.loop.beats);
 }
-void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
+void LoopXWaveformView::mouseDown(const juce::MouseEvent& event)
 {
     refresh(); if (!state.sample) return;
     if (getParentComponent()) getParentComponent()->grabKeyboardFocus();
     if (event.mods.isRightButtonDown())
     {
         juce::PopupMenu menu; menu.addItem(1, "SET selection as loop", state.segments == 1 && pendingSelection && selectionEnd > selectionStart); menu.addItem(2, "Save loop to slot", state.loop.end > state.loop.start && state.slots.size() < 10);
-        juce::Component::SafePointer<MiniSamplerWaveformView> safe(this);
-        menu.showMenuAsync(miniSamplerMenuOptions(*getParentComponent(), event.getScreenPosition()), [safe](int result)
+        juce::Component::SafePointer<LoopXWaveformView> safe(this);
+        menu.showMenuAsync(loopXMenuOptions(*getParentComponent(), event.getScreenPosition()), [safe](int result)
         { if (safe) { if (result == 1) safe->applySelection(); if (result == 2) { safe->processor.saveSlot(); if (safe->onChanged) safe->onChanged(); safe->refresh(); safe->repaint(); } } });
         return;
     }
@@ -439,7 +439,7 @@ void MiniSamplerWaveformView::mouseDown(const juce::MouseEvent& event)
     }
     repaint();
 }
-void MiniSamplerWaveformView::mouseDrag(const juce::MouseEvent& event)
+void LoopXWaveformView::mouseDrag(const juce::MouseEvent& event)
 {
     if (dragMode == 10)
     {
@@ -484,7 +484,7 @@ void MiniSamplerWaveformView::mouseDrag(const juce::MouseEvent& event)
     }
     repaint();
 }
-void MiniSamplerWaveformView::mouseUp(const juce::MouseEvent& event)
+void LoopXWaveformView::mouseUp(const juce::MouseEvent& event)
 {
     juce::ignoreUnused(event);
     const int completedMode = dragMode;
@@ -501,7 +501,7 @@ void MiniSamplerWaveformView::mouseUp(const juce::MouseEvent& event)
     }
     refresh(); mouseMove(event); repaint();
 }
-void MiniSamplerWaveformView::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+void LoopXWaveformView::mouseWheelMove(const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
 {
     if (!state.sample) return;
     const double anchor = timeForX(static_cast<float>(event.x));
@@ -515,7 +515,7 @@ void MiniSamplerWaveformView::mouseWheelMove(const juce::MouseEvent& event, cons
     }
     viewStart = juce::jlimit(0.0, juce::jmax(0.0, duration() - visibleLength()), viewStart); dirtyCache = true; repaint();
 }
-int MiniSamplerWaveformView::hitTestTool(float x, float y) const
+int LoopXWaveformView::hitTestTool(float x, float y) const
 {
     const auto area = waveArea();
     if (y < area.getY()) return 6;
@@ -533,15 +533,15 @@ int MiniSamplerWaveformView::hitTestTool(float x, float y) const
     if (std::abs(x - xForTime(state.loop.start)) <= 6 || std::abs(x - xForTime(state.loop.end)) <= 6) return 2;
     return 0;
 }
-void MiniSamplerWaveformView::mouseMove(const juce::MouseEvent& e)
+void LoopXWaveformView::mouseMove(const juce::MouseEvent& e)
 {
     const int hit = hitTestTool(float(e.x), float(e.y));
     // JUCE maps this standard cursor directly to IDC_SIZEALL on Windows.
     setMouseCursor(hit == 4 ? juce::MouseCursor::UpDownLeftRightResizeCursor :
         (hit != 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor));
 }
-void MiniSamplerWaveformView::mouseExit(const juce::MouseEvent&) { if (dragMode == 0) setMouseCursor(juce::MouseCursor::NormalCursor); }
-void MiniSamplerWaveformView::toggleStart()
+void LoopXWaveformView::mouseExit(const juce::MouseEvent&) { if (dragMode == 0) setMouseCursor(juce::MouseCursor::NormalCursor); }
+void LoopXWaveformView::toggleStart()
 {
     refresh();
     if (!state.originalSample) return;
@@ -549,9 +549,9 @@ void MiniSamplerWaveformView::toggleStart()
     else draftStart = state.startOffset;
     editingStart = !editingStart; pendingSelection = false; resetZoom();
 }
-void MiniSamplerWaveformView::resetZoom() { zoom = 1.0; viewStart = 0.0; dirtyCache = true; repaint(); }
+void LoopXWaveformView::resetZoom() { zoom = 1.0; viewStart = 0.0; dirtyCache = true; repaint(); }
 
-MiniSamplerAudioProcessorEditor::MiniSamplerAudioProcessorEditor(MiniSamplerAudioProcessor& p) : AudioProcessorEditor(&p), processor(p), waveform(p)
+LoopXAudioProcessorEditor::LoopXAudioProcessorEditor(LoopXAudioProcessor& p) : AudioProcessorEditor(&p), processor(p), waveform(p)
 {
     state = processor.getViewState();
     lookAndFeel.apply(state.palette); setLookAndFeel(&lookAndFeel);
@@ -560,11 +560,11 @@ MiniSamplerAudioProcessorEditor::MiniSamplerAudioProcessorEditor(MiniSamplerAudi
     waveform.onChanged = [this] { state = processor.getViewState(); layoutTools(); repaint(); };
     setSize(juce::jmax(900, state.width), state.height); startTimerHz(15);
 }
-MiniSamplerAudioProcessorEditor::~MiniSamplerAudioProcessorEditor()
+LoopXAudioProcessorEditor::~LoopXAudioProcessorEditor()
 {
     stopTimer(); waveform.onChanged = {}; controlPanel.reset(); fileChooser.reset(); setLookAndFeel(nullptr);
 }
-void MiniSamplerAudioProcessorEditor::layoutTools()
+void LoopXAudioProcessorEditor::layoutTools()
 {
     tools.clear();
     const auto put = [this](int id, juce::String text, int x, int width, bool active = false)
@@ -585,7 +585,7 @@ void MiniSamplerAudioProcessorEditor::layoutTools()
     put(play, "Loop", x, 40, processor.isLooping()); x += 44;
     put(settings, juce::String::charToString(0x2699), x, 27);
 }
-void MiniSamplerAudioProcessorEditor::resized()
+void LoopXAudioProcessorEditor::resized()
 {
     waveform.setBounds(4, 28, getWidth() - 8, juce::jmax(10, getHeight() - 32));
     layoutTools(); processor.setEditorSize(getWidth(), getHeight());
@@ -599,7 +599,7 @@ void MiniSamplerAudioProcessorEditor::resized()
                                     juce::jmin(580,getWidth()-16),juce::jmin(420,getHeight()-40));
     }
 }
-void MiniSamplerAudioProcessorEditor::paint(juce::Graphics& g)
+void LoopXAudioProcessorEditor::paint(juce::Graphics& g)
 {
     const auto palette = state.palette;
     g.fillAll(palette.toolbar); g.setFont(12.0f);
@@ -611,7 +611,7 @@ void MiniSamplerAudioProcessorEditor::paint(juce::Graphics& g)
         g.setColour(tool.active ? palette.activeText : palette.text); g.drawText(tool.text, tool.rect, juce::Justification::centred);
     }
 }
-void MiniSamplerAudioProcessorEditor::timerCallback()
+void LoopXAudioProcessorEditor::timerCallback()
 {
     const auto previous = state;
     state = processor.getViewState();
@@ -622,19 +622,19 @@ void MiniSamplerAudioProcessorEditor::timerCallback()
     if (lastTempo != processor.getTimelineTempo()) waveform.repaint();
     lastTempo = processor.getTimelineTempo(); lastPlaying = processor.isLooping();
 }
-void MiniSamplerAudioProcessorEditor::chooseFile()
+void LoopXAudioProcessorEditor::chooseFile()
 {
     fileChooser = std::make_unique<juce::FileChooser>("Load sample", juce::File{}, "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
-    juce::Component::SafePointer<MiniSamplerAudioProcessorEditor> safe(this);
+    juce::Component::SafePointer<LoopXAudioProcessorEditor> safe(this);
     fileChooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
         [safe](const juce::FileChooser& chooser) { if (safe && chooser.getResult().existsAsFile()) safe->processor.requestSampleLoad(chooser.getResult()); });
 }
-void MiniSamplerAudioProcessorEditor::mouseDown(const juce::MouseEvent& event)
+void LoopXAudioProcessorEditor::mouseDown(const juce::MouseEvent& event)
 {
     grabKeyboardFocus(); menuPosition = event.getScreenPosition();
     for (const auto& tool : tools) if (tool.rect.contains(event.getPosition())) { invoke(tool.id, event.mods.isRightButtonDown()); break; }
 }
-void MiniSamplerAudioProcessorEditor::invoke(int id, bool rightClick)
+void LoopXAudioProcessorEditor::invoke(int id, bool rightClick)
 {
     state = processor.getViewState();
     if (id >= 100) { if (rightClick) processor.deleteSlot(id - 100); else processor.recallSlot(id - 100); }
@@ -650,7 +650,7 @@ void MiniSamplerAudioProcessorEditor::invoke(int id, bool rightClick)
     else menuFor(id);
     state = processor.getViewState(); layoutTools(); waveform.refreshFromProcessor(); repaint();
 }
-void MiniSamplerAudioProcessorEditor::menuFor(int id)
+void LoopXAudioProcessorEditor::menuFor(int id)
 {
     juce::PopupMenu menu;
     if (id == length || id == grid)
@@ -674,7 +674,7 @@ void MiniSamplerAudioProcessorEditor::menuFor(int id)
         midi.addItem(60,"MIDI Note: Off",true,state.noteMode==0);
         midi.addItem(61,"MIDI Note -> Slot",true,state.noteMode==1);
         midi.addItem(62,"MIDI Note -> Loop Position",true,state.noteMode==2);
-        midi.addItem(63,"Note mapping... (Slot 1: " + MiniSamplerAudioProcessor::noteLabel(state.rootNote) + ")");
+        midi.addItem(63,"Note mapping... (Slot 1: " + LoopXAudioProcessor::noteLabel(state.rootNote) + ")");
         display.addItem(2, "Stereo waveform", true, state.stereoWaveform);
         display.addItem(3, "Bright Grid", true, state.brightGrid);
         const juce::StringArray names {"Studio Dark", "Graphite", "Slate", "Warm Gray", "Studio Light"};
@@ -687,10 +687,10 @@ void MiniSamplerAudioProcessorEditor::menuFor(int id)
         menu.addSeparator(); menu.addItem(50, "Load audio file...");
         menu.addItem(64,"Loop Position (automation)...");
     }
-    juce::Component::SafePointer<MiniSamplerAudioProcessorEditor> safe(this);
-    menu.showMenuAsync(miniSamplerMenuOptions(*this, menuPosition), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
+    juce::Component::SafePointer<LoopXAudioProcessorEditor> safe(this);
+    menu.showMenuAsync(loopXMenuOptions(*this, menuPosition), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
 }
-void MiniSamplerAudioProcessorEditor::handleMenu(int id, int result)
+void LoopXAudioProcessorEditor::handleMenu(int id, int result)
 {
     state = processor.getViewState();
     if (id == length) waveform.setMusicalLength(LoopMath::divisionBeats(result, processor.getProjectTimeSignatureNumerator(), processor.getProjectTimeSignatureDenominator()));
@@ -712,7 +712,7 @@ void MiniSamplerAudioProcessorEditor::handleMenu(int id, int result)
     }
     state = processor.getViewState(); layoutTools(); waveform.refreshFromProcessor(); repaint();
 }
-bool MiniSamplerAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
+bool LoopXAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
 {
     if (key.getModifiers().isCtrlDown() || key.getModifiers().isAltDown()) return false;
     const auto code = key.getKeyCode();
@@ -747,19 +747,19 @@ bool MiniSamplerAudioProcessorEditor::keyPressed(const juce::KeyPress& key)
     else return false;
     return true;
 }
-void MiniSamplerAudioProcessorEditor::mouseMove(const juce::MouseEvent& e)
+void LoopXAudioProcessorEditor::mouseMove(const juce::MouseEvent& e)
 {
     for (const auto& t : tools) if (t.rect.contains(e.getPosition()))
     { if (hoveredTool != t.id) { hoveredTool=t.id; repaint(0,0,getWidth(),28); } setMouseCursor(juce::MouseCursor::PointingHandCursor); return; }
     if (hoveredTool!=0) { hoveredTool=0; repaint(0,0,getWidth(),28); } setMouseCursor(juce::MouseCursor::NormalCursor);
 }
-void MiniSamplerAudioProcessorEditor::mouseExit(const juce::MouseEvent&) { hoveredTool=0; repaint(0,0,getWidth(),28); setMouseCursor(juce::MouseCursor::NormalCursor); }
+void LoopXAudioProcessorEditor::mouseExit(const juce::MouseEvent&) { hoveredTool=0; repaint(0,0,getWidth(),28); setMouseCursor(juce::MouseCursor::NormalCursor); }
 
 namespace {
 class BpmPanel final : public juce::Component, private juce::Timer
 {
 public:
-    explicit BpmPanel(MiniSamplerAudioProcessor& p) : processor(p)
+    explicit BpmPanel(LoopXAudioProcessor& p) : processor(p)
     {
         addAndMakeVisible(original); addAndMakeVisible(target); addAndMakeVisible(match); addAndMakeVisible(title);
         title.setText("Original BPM (sample)", juce::dontSendNotification);
@@ -785,14 +785,14 @@ private:
         target.setText("Project: " + juce::String(processor.getProjectTempo(), 2) + " BPM" +
             (processor.isLoading() ? " (rendering)" : ""), juce::dontSendNotification);
     }
-    MiniSamplerAudioProcessor& processor;
+    LoopXAudioProcessor& processor;
     juce::TextEditor original; juce::Label target, title; juce::TextButton match,done;
 };
 
 class NoteMappingPanel final : public juce::Component
 {
 public:
-    explicit NoteMappingPanel(MiniSamplerAudioProcessor& p) : processor(p)
+    explicit NoteMappingPanel(LoopXAudioProcessor& p) : processor(p)
     {
         for (auto* c : std::initializer_list<juce::Component*>{&mode,&root,&description,&done}) addAndMakeVisible(c);
         mode.addItem("Notes: Off",1); mode.addItem("Note -> Slot",2); mode.addItem("Note -> Loop Position",3);
@@ -824,17 +824,17 @@ private:
         else
         {
             const int low[] {1,14,27,40,52,65,78,90,103,116}, high[] {13,26,39,51,64,77,89,102,115,127};
-            for (int i=0;i<10;++i) text+="Slot "+juce::String(i+1)+" : "+(s.rootNote+i<=127 ? MiniSamplerAudioProcessor::noteLabel(s.rootNote+i) : "unmapped")+
+            for (int i=0;i<10;++i) text+="Slot "+juce::String(i+1)+" : "+(s.rootNote+i<=127 ? LoopXAudioProcessor::noteLabel(s.rootNote+i) : "unmapped")+
                 "    velocity "+juce::String(low[i])+"-"+juce::String(high[i])+"\n";
         }
         description.setText(text,juce::dontSendNotification);
     }
-    MiniSamplerAudioProcessor& processor; juce::ComboBox mode; juce::Slider root; juce::Label description; juce::TextButton done;
+    LoopXAudioProcessor& processor; juce::ComboBox mode; juce::Slider root; juce::Label description; juce::TextButton done;
 };
 class PositionPanel final : public juce::Component, private juce::Timer
 {
 public:
-    explicit PositionPanel(MiniSamplerAudioProcessor& p) : processor(p)
+    explicit PositionPanel(LoopXAudioProcessor& p) : processor(p)
     {
         addAndMakeVisible(position); addAndMakeVisible(label); addAndMakeVisible(done);
         position.setRange(0,100,0.01); position.setTextValueSuffix(" %"); position.setTextBoxStyle(juce::Slider::TextBoxRight,false,90,24);
@@ -855,14 +855,14 @@ public:
     void resized() override { label.setBounds(12,8,getWidth()-24,60); position.setBounds(12,76,getWidth()-24,32); done.setBounds(getWidth()-84,120,72,24); }
 private:
     void timerCallback() override { if (!gesture) position.setValue(processor.positionParameter->get()*100,juce::dontSendNotification); }
-    MiniSamplerAudioProcessor& processor; juce::Slider position; juce::Label label; juce::TextButton done; bool gesture=false;
+    LoopXAudioProcessor& processor; juce::Slider position; juce::Label label; juce::TextButton done; bool gesture=false;
 };
 }
-void MiniSamplerAudioProcessorEditor::showBpm()
+void LoopXAudioProcessorEditor::showBpm()
 {
     compactControlPanel = true; controlPanel = std::make_unique<BpmPanel>(processor); addAndMakeVisible(*controlPanel); resized(); controlPanel->toFront(true);
 }
-void MiniSamplerAudioProcessorEditor::showControlPanel(int type)
+void LoopXAudioProcessorEditor::showControlPanel(int type)
 {
     compactControlPanel = false;
     if (type==51) controlPanel=std::make_unique<LoopXThemeEditor>(processor);
