@@ -6,7 +6,7 @@
 #include "LoopPlayback.h"
 #include "ThemeColours.h"
 
-struct MiniSamplerSample
+struct LoopXSample
 {
     juce::AudioBuffer<float> audio;
     double rate = 44100.0;
@@ -76,14 +76,14 @@ struct MiniSamplerSample
     double duration() const { return audio.getNumSamples() / rate; }
 };
 
-class MiniSamplerAudioProcessor final : public juce::AudioProcessor, private juce::Thread, private juce::AsyncUpdater
+class LoopXAudioProcessor final : public juce::AudioProcessor, private juce::Thread, private juce::AsyncUpdater
 {
 public:
     struct Loop { double start = 0.0, end = 0.0, beats = 0.0, fadeIn = 0.004, fadeOut = 0.004; };
     struct ViewState
     {
-        std::shared_ptr<const MiniSamplerSample> sample;
-        std::shared_ptr<const MiniSamplerSample> originalSample;
+        std::shared_ptr<const LoopXSample> sample;
+        std::shared_ptr<const LoopXSample> originalSample;
         Loop loop;
         std::vector<Loop> slots;
         int grid = 3, segments = 1;
@@ -100,15 +100,15 @@ public:
         juce::String status;
     };
     static juce::File defaultPreferencesFile();
-    explicit MiniSamplerAudioProcessor(juce::File preferences = defaultPreferencesFile());
-    ~MiniSamplerAudioProcessor() override;
+    explicit LoopXAudioProcessor(juce::File preferences = defaultPreferencesFile());
+    ~LoopXAudioProcessor() override;
     void prepareToPlay(double, int) override;
     void releaseResources() override {}
     bool isBusesLayoutSupported(const BusesLayout&) const override;
     void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
-    const juce::String getName() const override { return "Mini Sampler"; }
+    const juce::String getName() const override { return "LoopX"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -197,11 +197,11 @@ private:
     double outputRate = 44100.0, fallbackBeat = 0.0;
     int loopMidiNote = 60;
     Loop audioLoop;
-    const MiniSamplerSample* lastAudioSample = nullptr;
-    std::atomic<const MiniSamplerSample*> audioSample { nullptr };
+    const LoopXSample* lastAudioSample = nullptr;
+    std::atomic<const LoopXSample*> audioSample { nullptr };
     // Old sample buffers are reclaimed by the loader, never by the audio callback.
     std::atomic<unsigned> audioReaders { 0 };
-    std::vector<std::shared_ptr<const MiniSamplerSample>> retired;
+    std::vector<std::shared_ptr<const LoopXSample>> retired;
     mutable juce::CriticalSection stateLock;
     ViewState state;
     juce::File pendingFile;
@@ -216,5 +216,5 @@ private:
     std::atomic<int> numerator { 4 }, denominator { 4 };
     std::atomic<bool> hostPlaying { false }, hostConnected { false }, loopEnabled { false };
     std::atomic<unsigned> loopSequence { 0 };
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoopXAudioProcessor)
 };
