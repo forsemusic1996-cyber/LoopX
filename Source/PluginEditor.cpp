@@ -738,18 +738,29 @@ void LoopXAudioProcessorEditor::menuFor(int id)
         noteBehaviors.addItem(85,"Resume",true,state.noteBehavior==2);
         noteBehaviors.addItem(86,"Restart after release",true,state.noteBehavior==3);
         midi.addSubMenu("Note behavior",noteBehaviors);
-        channelLength.addItem(70, "Enabled — Note On channel changes Loop Length", true, state.midiChannelLength);
+        channelLength.addItem(70, "Enabled - Note On changes Loop Length", true, state.midiChannelLength);
         channelLength.addSeparator();
-        channelLength.addItem(71, "Channel 1  →  1 Bar", false);
-        channelLength.addItem(72, "Channel 2  →  1/2", false);
-        channelLength.addItem(73, "Channel 3  →  1/4", false);
-        channelLength.addItem(74, "Channel 4  →  1/8", false);
-        channelLength.addItem(75, "Channel 5  →  1/16", false);
-        lengthChangeModes.addItem(76,"Seamless — keep current loop phase",true,state.lengthChangeMode==0);
-        lengthChangeModes.addItem(77,"Retrigger — restart at new loop start",true,state.lengthChangeMode==1);
-        channelLength.addSubMenu("Change behavior",lengthChangeModes);
+        channelLength.addItem(71, "Channel 1 -> Main notes (protected)", false);
+        channelLength.addItem(72, "Channel 2 -> 1 Bar", false);
+        channelLength.addItem(73, "Channel 3 -> 1/2", false);
+        channelLength.addItem(74, "Channel 4 -> 1/4", false);
+        channelLength.addItem(75, "Channel 5 -> 1/8", false);
+        channelLength.addItem(78, "Channel 6 -> 1/16", false);
+        lengthControlModes.addItem(87,"Hold On / Momentary",true,state.lengthControlMode==0);
+        lengthControlModes.addItem(88,"Latch",true,state.lengthControlMode==1);
+        channelLength.addSubMenu("Control mode",lengthControlModes);
+        lengthChangeModes.addItem(76,"Keep playback position",true,state.lengthChangeMode==0);
+        lengthChangeModes.addItem(77,"Restart from loop start",true,state.lengthChangeMode==1);
+        channelLength.addSubMenu("Playback cursor",lengthChangeModes);
+        timingModes.addItem(92,"Immediate",true,state.triggerTiming==0);
+        timingModes.addItem(93,"Next Grid",true,state.triggerTiming==1);
+        timingModes.addItem(94,"Next Beat",true,state.triggerTiming==2);
+        timingModes.addItem(95,"Next Bar",true,state.triggerTiming==3);
+        timingModes.addItem(96,"End of Loop",true,state.triggerTiming==4);
+        channelLength.addSubMenu("Trigger timing",timingModes);
         midi.addSeparator();
-        midi.addSubMenu("Channel → Loop Length" + juce::String(state.midiChannelLength ? " (On)" : " (Off)"), channelLength);
+        midi.addSubMenu("Channel -> Loop Length" + juce::String(state.midiChannelLength ? " (On)" : " (Off)"), channelLength);
+        midi.addItem(66,"Open MIDI Matrix...");
         display.addItem(2, "Stereo waveform", true, state.stereoWaveform);
         display.addItem(3, "Bright Grid", true, state.brightGrid);
         const juce::StringArray names {"Studio Dark", "Graphite", "Slate", "Warm Gray", "Studio Light"};
@@ -762,8 +773,8 @@ void LoopXAudioProcessorEditor::menuFor(int id)
         menu.addSeparator(); menu.addItem(50, "Load audio file...");
         menu.addItem(64,"Loop Position (automation)...");
         menu.addSeparator();
-        menu.addItem(90,"✦ Made by Andrew Dihtiaruk",false);
-        menu.addItem(91,"✦ Support Ko-Fi");
+        menu.addItem(90,"Made by Andrew Dihtiaruk",false);
+        menu.addItem(91,"Support Ko-Fi");
     }
     juce::Component::SafePointer<LoopXAudioProcessorEditor> safe(this);
     menu.showMenuAsync(loopXMenuOptions(*this, menuPosition), [safe, id](int result) { if (safe && result > 0) safe->handleMenu(id, result); });
@@ -784,12 +795,15 @@ void LoopXAudioProcessorEditor::handleMenu(int id, int result)
         if (result >= 30 && result <= 32) processor.setPlaybackSettings(state.playbackMode, result - 30);
         if (result >= 40 && result <= 44) processor.setTheme(result - 40);
         if (result == 50) chooseFile();
-        if (result == 51 || result == 63 || result == 64) showControlPanel(result);
+        if (result == 51 || result == 63 || result == 64 || result == 66) showControlPanel(result);
         if (result >= 60 && result <= 62) processor.setNoteSettings(result-60,state.rootNote);
         if (result == 65) processor.setAutoNoteNamesEnabled(!state.autoNoteNames);
         if (result == 70) processor.setMidiChannelLengthEnabled(!state.midiChannelLength);
         if (result == 76 || result == 77) processor.setLengthChangeMode(result-76);
         if (result >= 80 && result <= 82) processor.setMidiTriggerMode(result-80);
+        if (result >= 83 && result <= 86) processor.setMidiNoteBehavior(result-83);
+        if (result == 87 || result == 88) processor.setLengthControlMode(result-87);
+        if (result >= 92 && result <= 96) processor.setTriggerTiming(result-92);
         if (result == 91) juce::URL("https://ko-fi.com/pianohousestudio/shop").launchInDefaultBrowser();
         if (result >= 200 && result < 264) processor.loadUserTheme(result-200);
     }
@@ -930,7 +944,7 @@ public:
             processor.positionParameter->setValueNotifyingHost(float(position.getValue()/100));
             if (!gesture) processor.positionParameter->endChangeGesture();
         };
-        label.setText("Loop Position — automate this VST3 parameter in your DAW.\n0% = beginning; 100% = last valid start. Snap follows Grid.",juce::dontSendNotification);
+        label.setText("Loop Position - automate this VST3 parameter in your DAW.\n0% = beginning; 100% = last valid start. Snap follows Grid.",juce::dontSendNotification);
         done.setButtonText("Done"); done.onClick=[this]{setVisible(false);}; startTimerHz(15);
     }
     ~PositionPanel() override { stopTimer(); if (gesture) processor.positionParameter->endChangeGesture(); }
