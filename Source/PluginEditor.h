@@ -67,7 +67,8 @@ private:
     double lastResize = 0.0, viewStart = 0.0, zoom = 1.0;
     double selectionStart = 0.0, selectionEnd = 0.0, cursor = -1.0;
     double dragStart = 0.0, dragLoopStart = 0.0, dragLoopEnd = 0.0, dragViewStart = 0.0;
-    int dragMode = 0;
+    double dragCurve = 0.0;
+    int dragMode = 0, hoverFade = 0;
     bool loopPositionGesture = false;
     bool editingStart = false;
     double draftStart = 0;
