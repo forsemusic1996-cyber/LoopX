@@ -94,7 +94,8 @@ public:
         bool snap = true, triplet = false, zeroCross = false, midiKeyTracking = false;
         bool brightGrid = false, stereoWaveform = false;
         int playbackMode = 0, theme = 0, velocityMode = 0, noteMode = 0, rootNote = 60;
-        int triggerMode = 0, lengthChangeMode = 0;
+        int triggerMode = 0, noteBehavior = 0, lengthControlMode = 0;
+        int lengthChangeMode = 0, triggerTiming = 0;
         bool midiChannelLength = false, autoNoteNames = true;
         LoopXPalette palette = loopXPalette(0);
         bool customTheme = false;
@@ -150,7 +151,15 @@ public:
     void setMidiChannelLengthEnabled(bool enabled);
     void setAutoNoteNamesEnabled(bool enabled);
     void setMidiTriggerMode(int mode);
+    void setMidiNoteBehavior(int mode);
+    void setLengthControlMode(int mode);
     void setLengthChangeMode(int mode);
+    void setTriggerTiming(int mode);
+    void resetMidiMapping();
+    int getLastMidiChannel() const { return lastMidiChannel.load(); }
+    int getActiveLengthDivision() const { return activeLengthDivision.load(); }
+    unsigned getHeldLengthMask() const { return heldLengthMask.load(); }
+    unsigned getMidiActivityCounter() const { return midiActivityCounter.load(); }
     std::optional<juce::String> getNameForMidiNoteNumber(int, int) override;
     static juce::String noteLabel(int note) { return juce::MidiMessage::getMidiNoteName(note, true, true, 3); }
     void setLoopFades(double fadeIn, double fadeOut);
@@ -182,7 +191,7 @@ private:
     void flushPreferences();
     juce::var preferencesJson() const;
     void applyPreferences(const juce::var&);
-    void applyMidiChannelLength(int division);
+    void applyMidiChannelLength(int action);
     juce::File preferencesFile;
     std::atomic<bool> preferencesDirty{false};
     void publishLoop(const Loop&);
@@ -197,10 +206,15 @@ private:
     unsigned lastSelectionVersion = 0;
     int lastVelocity = -1;
     std::atomic<int> regionCount{0}, liveSlot{0}, playbackMode{0}, velocityMode{0}, liveGrid{3};
-    std::atomic<int> noteMode{0}, rootNote{60}, triggerMode{0}, lengthChangeMode{0};
+    std::atomic<int> noteMode{0}, rootNote{60}, triggerMode{0}, noteBehavior{0};
+    std::atomic<int> lengthControlMode{0}, lengthChangeMode{0}, triggerTiming{0};
     std::atomic<bool> midiChannelLength{false};
     std::atomic<bool> autoNoteNames{true};
     std::atomic<int> pendingLengthDivision{0};
+    std::atomic<double> restoreStart{0}, restoreEnd{0}, restoreBeats{0}, restoreFadeIn{0.004}, restoreFadeOut{0.004};
+    std::atomic<double> restoreFadeInCurve{0}, restoreFadeOutCurve{0};
+    std::atomic<int> lastMidiChannel{0}, activeLengthDivision{0};
+    std::atomic<unsigned> heldLengthMask{0}, midiActivityCounter{0};
     std::atomic<double> notePosition{-1};
     std::atomic<bool> liveSnap{true}, liveTriplet{false};
     std::atomic<double> sourceOffset{0}, timelineTempo{0};
@@ -210,9 +224,14 @@ private:
     int switchFade = 0;
     bool previousValid = false;
     std::array<uint64_t, 2048> heldNotes {};
+    std::array<uint64_t, 640> heldLengthNotes {};
     uint64_t noteOrder = 0;
     double midiPhase = 0, gateGain = 0, expectedBeat = 0;
-    bool latchGate = false;
+    bool latchGate = false, oneShotGate = false, performanceStarted = false;
+    bool lengthBaseValid = false;
+    Loop lengthBaseLoop;
+    int queuedLengthAction = 0;
+    double queuedLengthTargetBeat = 0;
     int selectedSlot = 0, lastParameterSlot = -1, lastMode = -1, lastTriggerMode = -1;
     double outputRate = 44100.0, fallbackBeat = 0.0;
     int loopMidiNote = 60;
