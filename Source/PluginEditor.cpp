@@ -389,10 +389,30 @@ void LoopXWaveformView::mouseDown(const juce::MouseEvent& event)
     if (getParentComponent()) getParentComponent()->grabKeyboardFocus();
     if (event.mods.isRightButtonDown())
     {
-        juce::PopupMenu menu; menu.addItem(1, "SET selection as loop", state.segments == 1 && pendingSelection && selectionEnd > selectionStart); menu.addItem(2, "Save loop to slot", state.loop.end > state.loop.start && state.slots.size() < 10);
+        juce::PopupMenu menu;
+        menu.addItem(1, "SET selection as loop", state.segments == 1 && pendingSelection && selectionEnd > selectionStart);
+        menu.addItem(2, "Save loop to slot", state.loop.end > state.loop.start && state.slots.size() < 10);
+        menu.addSeparator();
+        menu.addItem(3, "MIDI Trigger", true, state.playbackMode == 0);
+        menu.addItem(4, "Continuous Scrolling / Host Sync", true, state.playbackMode == 1);
         juce::Component::SafePointer<LoopXWaveformView> safe(this);
         menu.showMenuAsync(loopXMenuOptions(*getParentComponent(), event.getScreenPosition()), [safe](int result)
-        { if (safe) { if (result == 1) safe->applySelection(); if (result == 2) { safe->processor.saveSlot(); if (safe->onChanged) safe->onChanged(); safe->refresh(); safe->repaint(); } } });
+        {
+            if (!safe) return;
+            if (result == 1) safe->applySelection();
+            if (result == 2) safe->processor.saveSlot();
+            if (result == 3 || result == 4)
+            {
+                const auto current = safe->processor.getViewState();
+                safe->processor.setPlaybackSettings(result == 3 ? 0 : 1, current.velocityMode);
+            }
+            if (result > 0)
+            {
+                if (safe->onChanged) safe->onChanged();
+                safe->refresh();
+                safe->repaint();
+            }
+        });
         return;
     }
     dragStart = event.x; dragLoopStart = state.loop.start; dragLoopEnd = state.loop.end; dragViewStart = viewStart;
