@@ -407,16 +407,22 @@ int main()
         check(std::abs(p.getViewState().loop.start-0.3)<1e-6,"host position automation is continuous with Snap OFF");
 
         p.setNoteSettings(0,60); p.setPlaybackSettings(0,0); p.setMidiChannelLengthEnabled(true);
-        p.setLoopSelection(0.1,1.1,2); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(4,60,1.0f),0); p.processBlock(audio,midi);
+        p.setLoopSelection(0.1,1.1,2); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(5,60,1.0f),0); p.processBlock(audio,midi);
         juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
         const auto channelLength=p.getViewState();
         check(channelLength.midiChannelLength && std::abs(channelLength.loop.end-channelLength.loop.start-0.25)<1e-7 &&
               std::abs(channelLength.loop.beats-0.5)<1e-7,
-              "MIDI Channel 4 selects 1/8 Loop Length and updates visible state");
-        p.setLoopSelection(0.1,1.1,2); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(6,60,1.0f),0); p.processBlock(audio,midi);
+              "MIDI Channel 5 selects 1/8 Loop Length and updates visible state");
+        p.setLoopSelection(0.1,1.1,2); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(7,60,1.0f),0); p.processBlock(audio,midi);
         juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
         check(std::abs(p.getViewState().loop.end-p.getViewState().loop.start-1.0)<1e-7,
-              "MIDI channels 6-16 do not change Loop Length");
+              "MIDI channels 7-16 do not change Loop Length");
+        p.setLoopSelection(0.1,1.1,2); p.prepareToPlay(48000,256); midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,60,1.0f),0); p.processBlock(audio,midi);
+        check(audio.getMagnitude(0,256)>0.01,"Channel 1 remains a protected normal note channel while Loop Length mapping is enabled");
+        p.setLengthControlMode(0); p.setLoopSelection(0.1,1.1,2); p.prepareToPlay(48000,256); midi.clear();
+        midi.addEvent(juce::MidiMessage::noteOn(4,64,1.0f),0); p.processBlock(audio,midi); juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+        midi.clear(); midi.addEvent(juce::MidiMessage::noteOff(4,64),0); p.processBlock(audio,midi); juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+        check(std::abs(p.getViewState().loop.end-p.getViewState().loop.start-1.0)<1e-7,"Momentary length restores original region on Note Off");
         check(p.getNameForMidiNoteNumber(60,1).has_value()==false,"automatic note names follow the active note mapping");
         p.setNoteSettings(1,60); check(p.getNameForMidiNoteNumber(60,1).value_or("")=="Slot 1","automatic note names expose mapped slots");
         p.setAutoNoteNamesEnabled(false); check(!p.getNameForMidiNoteNumber(60,1).has_value(),"automatic note names can be disabled");
@@ -432,6 +438,7 @@ int main()
         check(p.renameUserTheme(0,"Renamed Studio") && p.loadUserTheme(0) && p.getViewState().themeName=="Renamed Studio",
               "user themes can be saved, renamed and reloaded without changing built-ins");
         p.setUiSettings(6,4,false,false,true); p.setDisplaySettings(true,true); p.setNoteSettings(1,48); p.setMidiChannelLengthEnabled(true); p.setAutoNoteNamesEnabled(false);
+        p.setMidiTriggerMode(2); p.setMidiNoteBehavior(2); p.setLengthControlMode(1); p.setLengthChangeMode(1); p.setTriggerTiming(3);
         juce::MemoryBlock completeState; p.getStateInformation(completeState);
         LoopXAudioProcessor fresh(juce::File{}); fresh.setTheme(4); fresh.setUiSettings(1,1,true,false,false);
         auto& freshHostInterface = static_cast<juce::AudioProcessor&>(fresh);
