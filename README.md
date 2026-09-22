@@ -1,124 +1,71 @@
-#pragma once
-#include "PluginProcessor.h"
-#include "ThemeEditor.h"
+# LoopX v0.4.1
+JUCE is reproducibly pinned to release 9.0.2, commit `72782788ce18c2d4d760b28e0921d6ffc6431102`; the cloud build does not use a JUCE installation from the developer PC.
+JUCE Windows x64 VST3 sampler, built and tested by GitHub Actions.
 
-inline juce::PopupMenu::Options loopXMenuOptions(juce::Component& editor, juce::Point<int> screenPoint)
-{
-    return juce::PopupMenu::Options().withTargetComponent(&editor)
-        .withTargetScreenArea({ screenPoint.x, screenPoint.y, 1, 1 })
-        .withParentComponent(&editor).withStandardItemHeight(22);
-}
+## Sample and BPM
+Drop a local audio file from Explorer or a DAW media browser, or use Settings > Load audio file.
+BPM opens the sample's Original BPM field. Enter the source tempo (20–400 BPM, decimals allowed), then Match BPM.
+Target BPM is always the project tempo. Signalsmith Stretch 1.1.0 performs pitch-preserving conversion on a background worker, from the original audio, never a previously stretched copy.
+Host-tempo changes automatically rebuild the processed audio. The original file is never changed.
+The live engine uses streaming WSOLA during transitions and for musical loop lengths.
+Very large tempo ratios can produce stretch artifacts; source tempo is not detected automatically.
 
-class LoopXWaveformView final : public juce::Component,
-                                     public juce::FileDragAndDropTarget,
-                                     public juce::TextDragAndDropTarget,
-                                     private juce::Timer
-{
-public:
-    explicit LoopXWaveformView(LoopXAudioProcessor&);
-    ~LoopXWaveformView() override;
-    void paint(juce::Graphics&) override;
-    void resized() override;
-    void mouseDown(const juce::MouseEvent&) override;
-    void mouseDrag(const juce::MouseEvent&) override;
-    void mouseUp(const juce::MouseEvent&) override;
-    void mouseMove(const juce::MouseEvent&) override;
-    void mouseExit(const juce::MouseEvent&) override;
-    void mouseWheelMove(const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
-    bool isInterestedInFileDrag(const juce::StringArray&) override;
-    void filesDropped(const juce::StringArray&, int, int) override;
-    void fileDragEnter(const juce::StringArray&, int, int) override;
-    void fileDragExit(const juce::StringArray&) override;
-    bool isInterestedInTextDrag(const juce::String&) override;
-    void textDropped(const juce::String&, int, int) override;
-    void textDragEnter(const juce::String&, int, int) override { dragOver = true; repaint(); }
-    void textDragExit(const juce::String&) override { dragOver = false; repaint(); }
-    void applySelection();
-    void setMusicalLength(double beats);
-    void scaleLength(double factor);
-    void moveLoop(double seconds);
-    void resetZoom();
-    void toggleStart();
-    bool isEditingStart() const { return editingStart; }
-    void refreshFromProcessor() { refresh(); repaint(); }
-    bool stereo = false;
-    bool brightGrid = false;
-    std::function<void()> onChanged;
-private:
-    void timerCallback() override;
-    void refresh();
-    void rebuildWaveCache();
-    void commit(double, double, double beats = 0.0);
-    double snapTime(double) const;
-    double timeForX(float) const;
-    float xForTime(double) const;
-    double gridSeconds() const;
-    double duration() const;
-    const LoopXSample* drawingSample() const;
-    int hitTestTool(float x, float y) const;
-    void activateSegmentAt(float x);
-    void setLoopPositionParameter(double start);
-    double visibleLength() const;
-    juce::Rectangle<float> waveArea() const;
-    LoopXAudioProcessor& processor;
-    LoopXAudioProcessor::ViewState state;
-    juce::Image waveCache;
-    bool dirtyCache = true, dragOver = false, pendingSelection = false;
-    double lastResize = 0.0, viewStart = 0.0, zoom = 1.0;
-    double selectionStart = 0.0, selectionEnd = 0.0, cursor = -1.0;
-    double dragStart = 0.0, dragLoopStart = 0.0, dragLoopEnd = 0.0, dragViewStart = 0.0;
-    double dragCurve = 0.0;
-    int dragMode = 0, hoverFade = 0;
-    bool loopPositionGesture = false;
-    bool editingStart = false;
-    double draftStart = 0;
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoopXWaveformView)
-};
+START enters original-file start-marker editing. Move the marker without Snap or ZC, then press OK.
+The logical waveform starts at that sample, and loop/slots are remapped to retain their source material.
+If a region is clipped at a boundary, its beat length scales proportionally so START never changes its playback speed.
 
-class LoopXAudioProcessorEditor final : public juce::AudioProcessorEditor,
-                                             public juce::FileDragAndDropTarget,
-                                             public juce::TextDragAndDropTarget,
-                                             private juce::Timer
-{
-public:
-    explicit LoopXAudioProcessorEditor(LoopXAudioProcessor&);
-    ~LoopXAudioProcessorEditor() override;
-    void paint(juce::Graphics&) override;
-    void resized() override;
-    void mouseDown(const juce::MouseEvent&) override;
-    bool keyPressed(const juce::KeyPress&) override;
-    void mouseMove(const juce::MouseEvent&) override;
-    void mouseExit(const juce::MouseEvent&) override;
-    bool isInterestedInFileDrag(const juce::StringArray& files) override { return waveform.isInterestedInFileDrag(files); }
-    void filesDropped(const juce::StringArray& files, int x, int y) override { waveform.filesDropped(files, x, y); }
-    void fileDragEnter(const juce::StringArray& files, int x, int y) override { waveform.fileDragEnter(files, x, y); }
-    void fileDragExit(const juce::StringArray& files) override { waveform.fileDragExit(files); }
-    bool isInterestedInTextDrag(const juce::String& text) override { return waveform.isInterestedInTextDrag(text); }
-    void textDropped(const juce::String& text, int x, int y) override { waveform.textDropped(text, x, y); }
-    void textDragEnter(const juce::String& text, int x, int y) override { waveform.textDragEnter(text, x, y); }
-    void textDragExit(const juce::String& text) override { waveform.textDragExit(text); }
-private:
-    struct Tool { int id; juce::String text; juce::Rectangle<int> rect; bool active; };
-    void timerCallback() override;
-    void layoutTools();
-    void invoke(int, bool rightClick);
-    void chooseFile();
-    void showBpm();
-    void showControlPanel(int);
-    void menuFor(int);
-    void handleMenu(int tool, int result);
-    LoopXAudioProcessor& processor;
-    LoopXWaveformView waveform;
-    LoopXAudioProcessor::ViewState state;
-    std::vector<Tool> tools;
-    std::unique_ptr<juce::FileChooser> fileChooser;
-    LoopXLookAndFeel lookAndFeel;
-    std::unique_ptr<juce::Component> controlPanel;
-    bool compactControlPanel = false;
-    int controlPanelType = 0;
-    int hoveredTool = 0;
-    double lastTempo = 120.0;
-    bool lastPlaying = false;
-    juce::Point<int> menuPosition;
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoopXAudioProcessorEditor)
-};
+## Playback and MIDI
+Settings > Playback: MIDI Trigger (default) or Continuous / Host Sync.
+MIDI Trigger starts/restarts on Note On, releases when no note is held. Continuous follows host play/stop and PPQ.
+MIDI key tracking is optional and off by default.
+Settings > MIDI: Velocity Off, Velocity -> Slot, or Velocity -> Loop Position.
+Velocity slot boundaries: 1–13, 14–26, 27–39, 40–51, 52–64, 65–77, 78–89, 90–102, 103–115, 116–127.
+Settings > MIDI also offers Note -> Slot and Note -> Loop Position (both optional, initially off).
+Automatic MIDI note names can be enabled or disabled in Settings > MIDI and are saved with the project and local preferences.
+Settings > MIDI > Channel -> Loop Length optionally maps Note On channels to musical lengths: Channel 1 = 1 Bar, 2 = 1/2, 3 = 1/4, 4 = 1/8, and 5 = 1/16. When enabled, channels 1-5 are length controls and trigger notes remain on channels 6-16.
+If a length control and trigger note share a timestamp, the selected length is applied before audio is rendered. During a held note, Seamless keeps the current loop phase while Retrigger restarts at the new loop start.
+MIDI Trigger mode offers Gate / Restart, Gate / Legato, and Latch; the selected trigger and length-change behaviors are saved.
+Note -> Slot: root note (default MIDI 60, shown as C3 in LoopX) selects Slot 1; the next nine semitones select Slots 2–10.
+Slot markers show the note name. Note mapping shows note/velocity ranges. Empty slots are silent.
+Note -> Loop Position: MIDI notes 0–127 select the first 128 grid divisions, preserving loop length, beat length and pitch. No banks.
+Positions past the end clamp to the last valid loop start. Root note affects only Slot mode.
+Note mappings take precedence over velocity mappings. Host Slot/Loop Position writes take effect until the next mapped Note On.
+JUCE exports Slot/Grid note labels to hosts that support custom note names; DAW octave conventions differ. Channel-specific labels are not guaranteed by VST3 hosts.
+
+## Editing and automation
+Drag a selection and press SET, or right-click to apply it. Segments activate immediately on mouse down/drag and disable ordinary Selection while that mode is active.
+Drag loop boundaries or the bottom loop handle. The bottom handle directly touches and writes the host-visible Loop Position parameter, so DAW Last Tweaked/automation recording works without opening Settings. Its four-arrow cursor and drag action share the exact same hit-zone.
+Drag the two upper fade handles to change independent fade-in/out. Hold Ctrl over a fade handle to highlight it, then drag vertically to bend its curve; each loop and slot stores its own shape.
+Mouse wheel zooms; Shift+wheel or middle-drag pans. Scrollbar is above waveform.
++ stores up to ten slots. Left-click recalls, right-click removes. Keys 1–9/0 recall.
+Host automation: Slot 0 = manual loop, 1–10 = saved slots; Loop Position = normalized sample position.
+Settings > Loop Position (automation) remains available as an alternative host-linked slider; choose the parameter named Loop Position for an envelope.
+Parameter IDs remain `slot` and `loopPosition` for compatibility with existing automation.
+Loop is a fixed-label on/off toggle; switching it off preserves the current region.
+Loop Position and velocity movement follow the chosen grid when Snap is enabled.
+Short transitions reduce switch clicks.
+Space requests host play/pause through supported transport control or Windows host-window key forwarding.
+Some hosts intercept keys differently; this needs checking in each DAW.
+
+## Project state
+LoopX keeps the existing manufacturer/plugin codes and automation parameter IDs. New state is saved with the `LoopX` tag; the previous state tag is still accepted when loading existing projects.
+Sample file paths are linked, not embedded. Keep the source WAV available when moving projects.
+START, BPM matching, loops, slots, fades, grid, playback/MIDI settings, theme, and editor size are saved.
+Five complete professional palettes: Studio Dark, Graphite, Slate, Warm Gray, Studio Light. Bright Grid is off by default.
+Settings > Themes > Theme editor: 33 separately editable RGBA colours, HSV colour selection, independent Selection/Loop alpha, live preview, user-theme save/rename, reset base, Cancel/Done, `.theme.json` import/export.
+The complete active palette and saved user-theme library are embedded in project state; external theme files are not needed to restore a project.
+Last-used grid/theme and UI settings also persist locally in the application-data `LoopX/settings.json`; project state takes precedence. Closing only the editor does not reset settings.
+The BPM button uses a compact 256 x 138 panel. Zoomed-out waveforms use a dimmer, anti-aliased envelope through the original pixel extrema. Audio is unchanged.
+The bottom Loop handle uses JUCE's standard four-direction cursor (Windows IDC_SIZEALL), including while dragging.
+Unload safety: bounded/chunked decode, cancellable waveform/render work, editor-owned control panels/timers, asynchronous non-parameter host notifications outside locks. Automated unload stress is not a substitute for a real FL Studio project test.
+
+## Build
+GitHub Actions uses Windows 2022 / MSVC and CMake, builds VST3 and Standalone with static runtime and PDBs.
+Download LoopX-VST3 from the successful run and preserve the complete .vst3 bundle.
+The symbols artifact is optional for crash analysis.
+CTest checks file-drop targets, exact waveform peaks, UI state, loop tools, MIDI/automation, START, Signalsmith duration/pitch/stereo, and audio/resize concurrency.
+It also checks fresh-instance theme/grid restoration, local defaults, 33-field theme roundtrip/validation, note mappings/names, START speed invariance, cross-thread host state queries and repeated unload during rendering with an open panel.
+EngineChecks independently verifies pitch preservation at several live tempo ratios.
+
+Signalsmith Stretch and its DSP dependency are MIT-licensed; both notices are included in the artifact.
+JUCE licensing still applies independently.
