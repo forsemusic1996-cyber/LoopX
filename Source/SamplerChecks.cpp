@@ -13,7 +13,7 @@ void check(bool passed, const char* message)
     if (!passed) throw std::runtime_error(message);
     std::cout << "PASS: " << message << std::endl;
 }
-void waitForLoad(MiniSamplerAudioProcessor& p)
+void waitForLoad(LoopXAudioProcessor& p)
 {
     for (int i = 0; i < 1000 && p.isLoading(); ++i) juce::Thread::sleep(10);
     check(!p.isLoading() && p.getViewState().sample != nullptr, "async sample loading");
@@ -51,7 +51,7 @@ struct ParameterTouchSpy final : juce::AudioProcessorParameter::Listener
 int main()
 {
     juce::ScopedJuceInitialiser_GUI init;
-    const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("MiniSampler-test", ".wav");
+    const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("LoopX-test", ".wav");
     try
     {
         juce::AudioBuffer<float> source(2, 88200);
@@ -61,15 +61,15 @@ int main()
         std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(file.createOutputStream().release(), 44100, 2, 16, {}, 0));
         check(writer != nullptr && writer->writeFromAudioSampleBuffer(source, 0, source.getNumSamples()), "test WAV creation"); writer.reset();
 
-        MiniSamplerAudioProcessor p(juce::File{});
+        LoopXAudioProcessor p(juce::File{});
         check(!p.getViewState().brightGrid, "Bright Grid is OFF by default");
         Transport host; p.setPlayHead(&host); p.prepareToPlay(48000, 256);
         juce::AudioBuffer<float> audio(2, 256); juce::MidiBuffer midi;
         p.processBlock(audio, midi);
         std::unique_ptr<juce::AudioProcessorEditor> editor(p.createEditor());
         auto* drop = dynamic_cast<juce::FileDragAndDropTarget*>(editor.get());
-        MiniSamplerWaveformView* wave = nullptr;
-        for (auto* child : editor->getChildren()) if (auto* found = dynamic_cast<MiniSamplerWaveformView*>(child)) wave = found;
+        LoopXWaveformView* wave = nullptr;
+        for (auto* child : editor->getChildren()) if (auto* found = dynamic_cast<LoopXWaveformView*>(child)) wave = found;
         auto* waveDrop = dynamic_cast<juce::FileDragAndDropTarget*>(wave);
         check(drop && wave && waveDrop, "JUCE RTTI finds PUBLIC drop targets on editor and waveform");
         juce::StringArray paths { file.getFullPathName() };
@@ -95,7 +95,7 @@ int main()
             check(actual.first == low && actual.second == high, "waveform cache returns EXACT original peaks including unaligned edges");
         }
         const auto anchor = editor->localPointToGlobal(juce::Point<int>{ 420, 12 });
-        const auto options = miniSamplerMenuOptions(*editor, anchor);
+        const auto options = loopXMenuOptions(*editor, anchor);
         check(options.getParentComponent() == editor.get() && options.getTargetScreenArea().getPosition() == anchor,
               "popup is constrained to plugin editor and anchored at clicked cursor position");
         const auto eventFor = [](juce::Component* component, float x, float y, int modifiers, bool dragging = false)
@@ -208,8 +208,8 @@ int main()
 
         const int lows[] {1,14,27,40,52,65,78,90,103,116}, highs[] {13,26,39,51,64,77,89,102,115,127};
         for (int slot = 0; slot < 10; ++slot)
-            check(MiniSamplerAudioProcessor::velocitySlot(lows[slot]) == slot + 1 &&
-                  MiniSamplerAudioProcessor::velocitySlot(highs[slot]) == slot + 1, "velocity maps to exact specified slot boundaries");
+            check(LoopXAudioProcessor::velocitySlot(lows[slot]) == slot + 1 &&
+                  LoopXAudioProcessor::velocitySlot(highs[slot]) == slot + 1, "velocity maps to exact specified slot boundaries");
         p.setLoopSelection(0.2, 0.7, 1); p.recallSlot(0); const auto stored = p.getViewState().loop;
         p.slotParameter->setValueNotifyingHost(p.slotParameter->convertTo0to1(0));
         midi.clear(); midi.addEvent(juce::MidiMessage::noteOn(1,60,1.0f),0); p.processBlock(audio, midi);
@@ -310,7 +310,7 @@ int main()
         check(std::abs(p.getViewState().sample->duration() - (2 - exactOffset) * 100 / 140) < 1.0 / 44100, "START trims logical duration before stretch");
         p.setTheme(4);
         juce::MemoryBlock transformedState; p.getStateInformation(transformedState);
-        MiniSamplerAudioProcessor transformedRestore(juce::File{});
+        LoopXAudioProcessor transformedRestore(juce::File{});
         transformedRestore.setStateInformation(transformedState.getData(), int(transformedState.getSize())); waitForLoad(transformedRestore);
         check(transformedRestore.getViewState().theme == 4 && transformedRestore.getViewState().stretchApplied &&
               transformedRestore.getViewState().startOffset == exactOffset, "theme, original BPM, START and processed state restore without embedding audio");
@@ -320,7 +320,7 @@ int main()
         p.setUiSettings(3, 1, true, false, false); midi.clear();
         p.setDisplaySettings(false, true);
         editor.reset(); editor.reset(p.createEditor());
-        for (auto* child : editor->getChildren()) if (auto* found = dynamic_cast<MiniSamplerWaveformView*>(child)) wave = found;
+        for (auto* child : editor->getChildren()) if (auto* found = dynamic_cast<LoopXWaveformView*>(child)) wave = found;
         check(!wave->brightGrid && wave->stereo, "editor reopen restores grid brightness and waveform mode");
         check(p.getViewState().sample != nullptr && p.getViewState().slots.size() == 1, "closing and reopening editor keeps sample and slots");
         juce::MessageManager::getInstance()->runDispatchLoopUntil(150);
@@ -343,7 +343,17 @@ int main()
         std::cout << "Resize stress: " << elapsed << " ms, " << blocks << " audio blocks\n";
         p.setUiSettings(5, 3, false, true, true); p.setMidiKeyTracking(true); p.setDisplaySettings(false, true);
         juce::MemoryBlock saved; p.getStateInformation(saved);
-        MiniSamplerAudioProcessor restored(juce::File{}); restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize())); waitForLoad(restored);
+        auto savedXml = juce::AudioProcessor::getXmlFromBinary(saved.getData(), static_cast<int>(saved.getSize()));
+        check(savedXml && savedXml->hasTagName("LoopX"), "new project state uses the LoopX tag");
+        savedXml->setTagName("MiniSamplerLoopX");
+        juce::MemoryBlock legacySaved; juce::AudioProcessor::copyXmlToBinary(*savedXml, legacySaved);
+        LoopXAudioProcessor legacyRestored(juce::File{});
+        legacyRestored.setStateInformation(legacySaved.getData(), static_cast<int>(legacySaved.getSize())); waitForLoad(legacyRestored);
+        const auto legacyState = legacyRestored.getViewState();
+        check(legacyState.sample && legacyState.slots.size() == 1 && legacyState.grid == 5
+              && legacyState.segments == 3 && legacyState.triplet && !legacyState.snap && legacyState.zeroCross,
+              "previous product state restores sample, slots and grid settings after rename");
+        LoopXAudioProcessor restored(juce::File{}); restored.setStateInformation(saved.getData(), static_cast<int>(saved.getSize())); waitForLoad(restored);
         const auto restoredState = restored.getViewState();
         check(restoredState.slots.size() == 1 && restoredState.grid == 5 && restoredState.segments == 3 && restoredState.zeroCross
               && restoredState.triplet && !restoredState.snap && restoredState.midiKeyTracking && !restoredState.brightGrid && restoredState.stereoWaveform,
@@ -405,7 +415,7 @@ int main()
               "user themes can be saved, renamed and reloaded without changing built-ins");
         p.setUiSettings(6,4,false,false,true); p.setDisplaySettings(true,true); p.setNoteSettings(1,48);
         juce::MemoryBlock completeState; p.getStateInformation(completeState);
-        MiniSamplerAudioProcessor fresh(juce::File{}); fresh.setTheme(4); fresh.setUiSettings(1,1,true,false,false);
+        LoopXAudioProcessor fresh(juce::File{}); fresh.setTheme(4); fresh.setUiSettings(1,1,true,false,false);
         auto& freshHostInterface = static_cast<juce::AudioProcessor&>(fresh);
         StateQueryHost restoreHost; freshHostInterface.addListener(&restoreHost);
         fresh.setStateInformation(completeState.getData(),int(completeState.getSize()));
@@ -415,17 +425,17 @@ int main()
         check(complete.palette==palette && complete.customTheme && complete.themeName=="Renamed Studio" && complete.grid==6 && complete.segments==4 &&
               !complete.snap && complete.zeroCross && complete.brightGrid && complete.stereoWaveform && complete.noteMode==1 && complete.rootNote==48,
               "fresh processor restores full theme + last grid settings; DAW state overrides defaults");
-        auto* freshEditor=static_cast<MiniSamplerAudioProcessorEditor*>(fresh.createEditor());
-        MiniSamplerWaveformView* freshWave=nullptr;
-        for(auto* child:freshEditor->getChildren()) if(auto* w=dynamic_cast<MiniSamplerWaveformView*>(child)) freshWave=w;
+        auto* freshEditor=static_cast<LoopXAudioProcessorEditor*>(fresh.createEditor());
+        LoopXWaveformView* freshWave=nullptr;
+        for(auto* child:freshEditor->getChildren()) if(auto* w=dynamic_cast<LoopXWaveformView*>(child)) freshWave=w;
         check(freshWave && freshWave->brightGrid && freshWave->stereo,"restored editor uses project settings, not constructor defaults");
         // Background/BPM panel and its timer are destroyed synchronously with editor.
         freshEditor->mouseDown(eventFor(freshEditor,float(freshEditor->getWidth()-320),12,juce::ModifierKeys::leftButtonModifier));
         delete freshEditor; juce::MessageManager::getInstance()->runDispatchLoopUntil(50);
 
         const auto prefs=file.getSiblingFile(file.getFileNameWithoutExtension()+"-settings.json");
-        { MiniSamplerAudioProcessor first(prefs); first.setCustomTheme(palette,"Persistent"); first.saveUserTheme("Persistent"); first.setUiSettings(6,4,false,false,true); }
-        { MiniSamplerAudioProcessor second(prefs); const auto s=second.getViewState();
+        { LoopXAudioProcessor first(prefs); first.setCustomTheme(palette,"Persistent"); first.saveUserTheme("Persistent"); first.setUiSettings(6,4,false,false,true); }
+        { LoopXAudioProcessor second(prefs); const auto s=second.getViewState();
           check(s.grid==6 && s.segments==4 && !s.snap && s.zeroCross && s.palette==palette && s.themeName=="Persistent",
                 "plugin deletion / new instance restores last-used theme and grid from preferences"); }
         prefs.deleteFile();
@@ -437,18 +447,18 @@ int main()
         const auto shutdownStart=juce::Time::getMillisecondCounterHiRes();
         for(int n=0;n<12;++n)
         {
-            auto closing=std::make_unique<MiniSamplerAudioProcessor>(juce::File{}); closing->requestSampleLoad(file); waitForLoad(*closing);
+            auto closing=std::make_unique<LoopXAudioProcessor>(juce::File{}); closing->requestSampleLoad(file); waitForLoad(*closing);
             closing->matchBpm(80); auto closingEditor=std::unique_ptr<juce::AudioProcessorEditor>(closing->createEditor());
             closingEditor->mouseDown(eventFor(closingEditor.get(),float(closingEditor->getWidth()-320),12,juce::ModifierKeys::leftButtonModifier));
             closingEditor.reset(); closing.reset();
             juce::MessageManager::getInstance()->runDispatchLoopUntil(2);
         }
         check(juce::Time::getMillisecondCounterHiRes()-shutdownStart<10000,"repeated unload during rendering with an open BPM panel completes promptly");
-        MiniSamplerSample cancelling; cancelling.audio.makeCopyOf(source);
+        LoopXSample cancelling; cancelling.audio.makeCopyOf(source);
         check(!cancelling.buildWaveform([]{return true;}),"peak building supports immediate cooperative cancellation");
         editor.reset(); p.setPlayHead(nullptr);
         file.deleteFile();
-        std::cout << "All MiniSampler checks passed\n"; return 0;
+        std::cout << "All LoopX checks passed\n"; return 0;
     }
     catch (const std::exception& e) { std::cerr << "FAIL: " << e.what() << std::endl; file.deleteFile(); return 1; }
 }
