@@ -943,11 +943,11 @@ public:
         preset.addItemList({"Preset: Default","Preset: Live Play","Preset: DAW Quantized"},1);
         lengthEnabled.setButtonText("Enable Channel 2-6 Loop Length control"); autoNames.setButtonText("Automatic MIDI note names");
         mapping.setJustificationType(juce::Justification::topLeft);
-        mapping.setText("ROUTING - Conflict check: OK
+        mapping.setText(R"(ROUTING - Conflict check: OK
 Main Notes: Ch 1 (protected)
 Loop Length: Ch 2 = 1 Bar, Ch 3 = 1/2, Ch 4 = 1/4, Ch 5 = 1/8, Ch 6 = 1/16
 Ch 7-16 remain available for normal notes and future mapping.
-Hold On restores the previous length; overlapping controls use the last held note.",juce::dontSendNotification);
+Hold On restores the previous length; overlapping controls use the last held note.)",juce::dontSendNotification);
         reset.setButtonText("Reset Mapping"); done.setButtonText("Done");
         trigger.onChange=[this]{if(!syncing)processor.setMidiTriggerMode(trigger.getSelectedId()-1);};
         behavior.onChange=[this]{if(!syncing)processor.setMidiNoteBehavior(behavior.getSelectedId()-1);};
