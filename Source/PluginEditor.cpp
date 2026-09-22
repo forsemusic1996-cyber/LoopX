@@ -25,7 +25,7 @@ juce::File fileFromText(juce::String text)
     return juce::File::isAbsolutePath(text) ? juce::File(text) : juce::File{};
 }
 constexpr int load = 1, set = 2, add = 3, length = 4, twice = 5, half = 6,
-              segments = 7, snap = 8, grid = 9, zc = 10, settings = 11, play = 12, bpmTool = 13;
+              segments = 7, snap = 8, grid = 9, zc = 10, settings = 11, play = 12, bpmTool = 13, midiTool = 14;
 const juce::StringArray divisions { "1 Bar", "1/2", "1/4", "1/8", "1/16", "1/32" };
 }
 
@@ -606,10 +606,10 @@ LoopXAudioProcessorEditor::LoopXAudioProcessorEditor(LoopXAudioProcessor& p) : A
 {
     state = processor.getViewState();
     lookAndFeel.apply(state.palette); setLookAndFeel(&lookAndFeel);
-    setOpaque(true); setWantsKeyboardFocus(true); setResizable(true, true); setResizeLimits(900, 260, 1800, 1100);
+    setOpaque(true); setWantsKeyboardFocus(true); setResizable(true, true); setResizeLimits(1000, 260, 1800, 1100);
     addAndMakeVisible(waveform);
     waveform.onChanged = [this] { state = processor.getViewState(); layoutTools(); repaint(); };
-    setSize(juce::jmax(900, state.width), state.height); startTimerHz(15);
+    setSize(juce::jmax(1000, state.width), state.height); startTimerHz(15);
 }
 LoopXAudioProcessorEditor::~LoopXAudioProcessorEditor()
 {
@@ -625,16 +625,17 @@ void LoopXAudioProcessorEditor::layoutTools()
     for (size_t i = 0; i < state.slots.size(); ++i) { put(100 + static_cast<int>(i), juce::String(i == 9 ? 0 : static_cast<int>(i) + 1), x, 22, true); x += 25; }
     put(add, "+", x, 22, state.slots.size() < 10);
     // Central musical length group stays centred, independently of slot count.
-    const int centre = juce::jlimit(x + 26, getWidth() - 524, getWidth() / 2 - 93);
-    put(length, "LOOP LENGTH", centre, 112, true); put(twice, juce::String::charToString(0x00d7) + "2", centre + 116, 31); put(half, juce::String::charToString(0x00f7) + "2", centre + 151, 31);
-    x = getWidth() - 332;
+    const int centre = juce::jlimit(x + 26, getWidth() - 578, getWidth() / 2 - 93);
+    put(length, "LOOP LENGTH", centre, 112, true); put(twice, "x2", centre + 116, 31); put(half, "/2", centre + 151, 31);
+    x = getWidth() - 382;
+    put(midiTool, "MIDI", x, 46, controlPanelType == 66); x += 50;
     put(bpmTool, "BPM", x, 42, state.stretchApplied); x += 46;
     put(segments, state.segments == 1 ? "Segments" : "Seg " + juce::StringArray({ "Off", "1/1", "1/2", "1/4", "1/8" })[state.segments - 1], x, 72, state.segments > 1); x += 76;
     put(snap, "Snap", x, 42, state.snap); x += 46;
     put(grid, divisions[state.grid - 1] + (state.triplet ? "T" : ""), x, 49); x += 53;
     put(zc, "ZC", x, 28, state.zeroCross); x += 32;
     put(play, "Loop", x, 40, processor.isLooping()); x += 44;
-    put(settings, juce::String::charToString(0x2699), x, 27);
+    put(settings, "SET", x, 27);
 }
 void LoopXAudioProcessorEditor::resized()
 {
@@ -691,6 +692,7 @@ void LoopXAudioProcessorEditor::invoke(int id, bool rightClick)
     if (id >= 100) { if (rightClick) processor.deleteSlot(id - 100); else processor.recallSlot(id - 100); }
     else if (id == load) waveform.toggleStart();
     else if (id == bpmTool) showBpm();
+    else if (id == midiTool) { if (controlPanel && controlPanelType == 66) { controlPanel.reset(); controlPanelType = 0; } else showControlPanel(66); }
     else if (id == set) waveform.applySelection();
     else if (id == add) processor.saveSlot();
     else if (id == twice) waveform.scaleLength(2.0);
@@ -713,7 +715,7 @@ void LoopXAudioProcessorEditor::menuFor(int id)
     }
     if (id == settings)
     {
-        juce::PopupMenu playback, midi, channelLength, triggerModes, lengthChangeModes, display, themes;
+        juce::PopupMenu playback, midi, channelLength, triggerModes, noteBehaviors, lengthControlModes, lengthChangeModes, timingModes, display, themes;
         playback.addItem(20, "MIDI Trigger", true, state.playbackMode == 0);
         playback.addItem(21, "Continuous / Host Sync", true, state.playbackMode == 1);
         midi.addItem(6, "MIDI key tracking", true, state.midiKeyTracking);
@@ -727,10 +729,15 @@ void LoopXAudioProcessorEditor::menuFor(int id)
         midi.addItem(62,"MIDI Note -> Loop Position",true,state.noteMode==2);
         midi.addItem(63,"Note mapping... (Slot 1: " + LoopXAudioProcessor::noteLabel(state.rootNote) + ")");
         midi.addItem(65,"Automatic MIDI note names",true,state.autoNoteNames);
-        triggerModes.addItem(80,"Gate / Restart — each Note On restarts",true,state.triggerMode==0);
-        triggerModes.addItem(81,"Gate / Legato — overlapping notes keep position",true,state.triggerMode==1);
-        triggerModes.addItem(82,"Latch — Note On toggles play / stop",true,state.triggerMode==2);
+        triggerModes.addItem(80,"Gate / Hold",true,state.triggerMode==0);
+        triggerModes.addItem(81,"Latch / Toggle",true,state.triggerMode==1);
+        triggerModes.addItem(82,"One Shot",true,state.triggerMode==2);
         midi.addSubMenu("Trigger mode",triggerModes);
+        noteBehaviors.addItem(83,"Retrigger",true,state.noteBehavior==0);
+        noteBehaviors.addItem(84,"Legato / No Retrigger",true,state.noteBehavior==1);
+        noteBehaviors.addItem(85,"Resume",true,state.noteBehavior==2);
+        noteBehaviors.addItem(86,"Restart after release",true,state.noteBehavior==3);
+        midi.addSubMenu("Note behavior",noteBehaviors);
         channelLength.addItem(70, "Enabled — Note On channel changes Loop Length", true, state.midiChannelLength);
         channelLength.addSeparator();
         channelLength.addItem(71, "Channel 1  →  1 Bar", false);
