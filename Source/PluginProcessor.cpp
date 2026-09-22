@@ -208,14 +208,21 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
     const bool seek = std::abs(beat - expectedBeat) > juce::jmax(0.0001, beatStep * 2);
     expectedBeat = beat + buffer.getNumSamples() * beatStep;
     auto event = midi.cbegin(); const auto eventEnd = midi.cend();
-    bool gate = trigger == 2 ? latchGate : std::any_of(heldNotes.begin(), heldNotes.end(), [](uint64_t order){ return order != 0; });
+    bool gate = trigger == 1 ? latchGate : (trigger == 2 ? oneShotGate
+        : std::any_of(heldNotes.begin(), heldNotes.end(), [](uint64_t order){ return order != 0; }));
     double cursor = -1;
     const auto* const* input = sample->audio.getArrayOfReadPointers();
     const double logicalDuration = sample->duration() - offset;
-    const auto applyRealtimeLength = [&](int division)
+    const auto applyRealtimeLength = [&](int action)
     {
         const int regionIndex = juce::jlimit(0, count, selectedSlot);
         auto& target = rtRegions[size_t(regionIndex)];
+        if (action == -1)
+        {
+            if (!lengthBaseValid) return false;
+            target = lengthBaseLoop; activeLengthDivision.store(0); return true;
+        }
+        const int division = juce::jlimit(1, 5, action);
         const double tempo = gridTempo > 0 ? gridTempo : projectTempo.load();
         const double beats = LoopMath::divisionBeats(division, numerator.load(), denominator.load());
         const double end = juce::jmin(logicalDuration, target.start + beats * 60.0 / tempo);
@@ -223,10 +230,26 @@ void LoopXAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::M
         target.end = end; target.beats = (end - target.start) * tempo / 60.0;
         target.fadeIn = juce::jmin(target.fadeIn, (end - target.start) * 0.5);
         target.fadeOut = juce::jmin(target.fadeOut, (end - target.start) * 0.5);
+        activeLengthDivision.store(division);
         return true;
     };
     const int pendingLength = pendingLengthDivision.load();
-    const bool pendingLengthAtBlockStart = pendingLength > 0 && applyRealtimeLength(pendingLength);
+    const bool pendingLengthAtBlockStart = pendingLength != 0 && applyRealtimeLength(pendingLength);
+    const auto queueLength = [&](int action, double nowBeat)
+    {
+        queuedLengthAction = action;
+        const int timing = triggerTiming.load();
+        if (timing == 4) { queuedLengthTargetBeat = -1; return; }
+        double quantum = 0;
+        if (timing == 1) quantum = LoopMath::divisionBeats(liveGrid.load(), numerator.load(), denominator.load()) * (liveTriplet.load() ? 2.0 / 3.0 : 1.0);
+        if (timing == 2) quantum = 1.0;
+        if (timing == 3) quantum = LoopMath::divisionBeats(1, numerator.load(), denominator.load());
+        queuedLengthTargetBeat = quantum > 0 ? std::ceil((nowBeat + 1.0e-9) / quantum) * quantum : nowBeat;
+    };
+    const auto publishLength = [&](int action)
+    {
+        pendingLengthDivision.store(action); triggerAsyncUpdate();
+    };
     for (int i = 0; i < buffer.getNumSamples(); ++i)
     {
         bool restart = sampleChanged && i == 0;
