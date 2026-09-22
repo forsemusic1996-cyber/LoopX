@@ -1,4 +1,4 @@
-name: Build MiniSampler VST3
+name: Build LoopX VST3
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 concurrency:
-  group: MiniSampler-main
+  group: LoopX-main
   cancel-in-progress: true
 
 jobs:
@@ -57,13 +57,13 @@ jobs:
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MiniSampler-VST3
+          name: LoopX-VST3
           path: package/*.vst3
           if-no-files-found: error
 
       - name: Upload debug symbols
         uses: actions/upload-artifact@v4
         with:
-          name: MiniSampler-symbols
+          name: LoopX-symbols
           path: build/**/*.pdb
           if-no-files-found: error
