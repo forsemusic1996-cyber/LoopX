@@ -21,6 +21,10 @@ MIDI key tracking is optional and off by default.
 Settings > MIDI: Velocity Off, Velocity -> Slot, or Velocity -> Loop Position.
 Velocity slot boundaries: 1–13, 14–26, 27–39, 40–51, 52–64, 65–77, 78–89, 90–102, 103–115, 116–127.
 Settings > MIDI also offers Note -> Slot and Note -> Loop Position (both optional, initially off).
+Automatic MIDI note names can be enabled or disabled in Settings > MIDI and are saved with the project and local preferences.
+Settings > MIDI > Channel -> Loop Length optionally maps Note On channels to musical lengths: Channel 1 = 1 Bar, 2 = 1/2, 3 = 1/4, 4 = 1/8, and 5 = 1/16. When enabled, channels 1-5 are length controls and trigger notes remain on channels 6-16.
+If a length control and trigger note share a timestamp, the selected length is applied before audio is rendered. During a held note, Seamless keeps the current loop phase while Retrigger restarts at the new loop start.
+MIDI Trigger mode offers Gate / Restart, Gate / Legato, and Latch; the selected trigger and length-change behaviors are saved.
 Note -> Slot: root note (default MIDI 60, shown as C3 in LoopX) selects Slot 1; the next nine semitones select Slots 2–10.
 Slot markers show the note name. Note mapping shows note/velocity ranges. Empty slots are silent.
 Note -> Loop Position: MIDI notes 0–127 select the first 128 grid divisions, preserving loop length, beat length and pitch. No banks.
@@ -31,7 +35,7 @@ JUCE exports Slot/Grid note labels to hosts that support custom note names; DAW 
 ## Editing and automation
 Drag a selection and press SET, or right-click to apply it. Segments activate immediately on mouse down/drag and disable ordinary Selection while that mode is active.
 Drag loop boundaries or the bottom loop handle. The bottom handle directly touches and writes the host-visible Loop Position parameter, so DAW Last Tweaked/automation recording works without opening Settings. Its four-arrow cursor and drag action share the exact same hit-zone.
-Drag the two upper fade handles to change independent fade-in/out.
+Drag the two upper fade handles to change independent fade-in/out. Hold Ctrl over a fade handle to highlight it, then drag vertically to bend its curve; each loop and slot stores its own shape.
 Mouse wheel zooms; Shift+wheel or middle-drag pans. Scrollbar is above waveform.
 + stores up to ten slots. Left-click recalls, right-click removes. Keys 1–9/0 recall.
 Host automation: Slot 0 = manual loop, 1–10 = saved slots; Loop Position = normalized sample position.
