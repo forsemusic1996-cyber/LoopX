@@ -2,21 +2,21 @@
 #include "PluginProcessor.h"
 #include "ThemeEditor.h"
 
-inline juce::PopupMenu::Options miniSamplerMenuOptions(juce::Component& editor, juce::Point<int> screenPoint)
+inline juce::PopupMenu::Options loopXMenuOptions(juce::Component& editor, juce::Point<int> screenPoint)
 {
     return juce::PopupMenu::Options().withTargetComponent(&editor)
         .withTargetScreenArea({ screenPoint.x, screenPoint.y, 1, 1 })
         .withParentComponent(&editor).withStandardItemHeight(22);
 }
 
-class MiniSamplerWaveformView final : public juce::Component,
+class LoopXWaveformView final : public juce::Component,
                                      public juce::FileDragAndDropTarget,
                                      public juce::TextDragAndDropTarget,
                                      private juce::Timer
 {
 public:
-    explicit MiniSamplerWaveformView(MiniSamplerAudioProcessor&);
-    ~MiniSamplerWaveformView() override;
+    explicit LoopXWaveformView(LoopXAudioProcessor&);
+    ~LoopXWaveformView() override;
     void paint(juce::Graphics&) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -54,14 +54,14 @@ private:
     float xForTime(double) const;
     double gridSeconds() const;
     double duration() const;
-    const MiniSamplerSample* drawingSample() const;
+    const LoopXSample* drawingSample() const;
     int hitTestTool(float x, float y) const;
     void activateSegmentAt(float x);
     void setLoopPositionParameter(double start);
     double visibleLength() const;
     juce::Rectangle<float> waveArea() const;
-    MiniSamplerAudioProcessor& processor;
-    MiniSamplerAudioProcessor::ViewState state;
+    LoopXAudioProcessor& processor;
+    LoopXAudioProcessor::ViewState state;
     juce::Image waveCache;
     bool dirtyCache = true, dragOver = false, pendingSelection = false;
     double lastResize = 0.0, viewStart = 0.0, zoom = 1.0;
@@ -71,17 +71,17 @@ private:
     bool loopPositionGesture = false;
     bool editingStart = false;
     double draftStart = 0;
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerWaveformView)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoopXWaveformView)
 };
 
-class MiniSamplerAudioProcessorEditor final : public juce::AudioProcessorEditor,
+class LoopXAudioProcessorEditor final : public juce::AudioProcessorEditor,
                                              public juce::FileDragAndDropTarget,
                                              public juce::TextDragAndDropTarget,
                                              private juce::Timer
 {
 public:
-    explicit MiniSamplerAudioProcessorEditor(MiniSamplerAudioProcessor&);
-    ~MiniSamplerAudioProcessorEditor() override;
+    explicit LoopXAudioProcessorEditor(LoopXAudioProcessor&);
+    ~LoopXAudioProcessorEditor() override;
     void paint(juce::Graphics&) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -106,9 +106,9 @@ private:
     void showControlPanel(int);
     void menuFor(int);
     void handleMenu(int tool, int result);
-    MiniSamplerAudioProcessor& processor;
-    MiniSamplerWaveformView waveform;
-    MiniSamplerAudioProcessor::ViewState state;
+    LoopXAudioProcessor& processor;
+    LoopXWaveformView waveform;
+    LoopXAudioProcessor::ViewState state;
     std::vector<Tool> tools;
     std::unique_ptr<juce::FileChooser> fileChooser;
     LoopXLookAndFeel lookAndFeel;
@@ -118,5 +118,5 @@ private:
     double lastTempo = 120.0;
     bool lastPlaying = false;
     juce::Point<int> menuPosition;
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MiniSamplerAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LoopXAudioProcessorEditor)
 };
